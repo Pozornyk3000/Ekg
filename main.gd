@@ -10,6 +10,7 @@ const DEFAULTS := {
     "pace_fault": "none", "pvc_rate": 0.0, "pvc_focus": "lv_lat_mid",
     "resp_arr": 0.06, "baseline_wander": 0.0, "mains_noise": 0.0,
     "st_shape": 0.0, "p_morph": "normal",
+    "delta_amp": 0.0, "j_wave": 0.0, "t_post": 0.0, "pr_dep": 0.0,
 }
 const STATE_DEFAULTS := {
     "k": 4.0, "ca": 2.4, "mg": 0.85, "na": 140.0,
@@ -72,6 +73,11 @@ const PRESETS := [
     {"name": "ЭКС бивентрикулярный (CRT)", "p": {"rhythm": "pace_biv", "hr": 70.0, "qrs_axis": -120.0, "p_amp": 1.0}, "s": {}},
     {"name": "ЭКС: потеря захвата", "p": {"rhythm": "pace_vvi", "hr": 70.0, "pace_fault": "loss_capture", "p_amp": 0.0}, "s": {}},
     {"name": "ЭКС: undersensing", "p": {"rhythm": "pace_vvi", "hr": 75.0, "pace_fault": "undersense", "p_amp": 0.0}, "s": {}},
+    {"name": "WPW (дельта-волна)", "p": {"pr": 90.0, "delta_amp": 0.38, "qrs_dur": 110.0}, "s": {}},
+    {"name": "Wellens (крит. стеноз ПМЖВ)", "p": {"t_post": 7.5}, "s": {}},
+    {"name": "Ранняя реполяризация", "p": {"j_wave": 1.6, "st_y": 1.3, "st_shape": -0.4}, "s": {}},
+    {"name": "Перикардит (диффузный)", "p": {"st_x": 0.6, "st_y": 1.8, "st_z": -0.4, "st_shape": -0.4, "pr_dep": 0.55}, "s": {}},
+    {"name": "Синдром Бругада (тип 1)", "p": {"st_x": -0.8, "st_z": -2.4, "st_shape": 1.0, "t_post": 4.5}, "s": {}},
 ]
 
 var params := DEFAULTS.duplicate(true)

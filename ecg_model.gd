@@ -244,19 +244,27 @@ static func _p_components(p: Dictionary) -> Array:
     var pa := deg_to_rad(60.0)
     var pdir := _u(Vector3(cos(pa), sin(pa), 0.10))
     var morph := str(p.get("p_morph", "normal"))
+    var out: Array = []
     if morph == "pulmonale":
         # P-pulmonale (ГПП): высокий заострённый P, ось чуть «нижнее».
         var pdp := _u(Vector3(cos(deg_to_rad(75.0)), sin(deg_to_rad(75.0)), 0.05))
-        return [{"v": pdp * (pamp * 1.5), "c": pd * 0.45, "s": maxf(pd * 0.22, 6.0)}]
+        out = [{"v": pdp * (pamp * 1.5), "c": pd * 0.45, "s": maxf(pd * 0.22, 6.0)}]
     elif morph == "mitrale":
         # P-mitrale (ГЛП): широкий двугорбый P; терминальная часть кзади (+Z) →
         # двухфазный P в V1 с глубокой отрицательной фазой, зазубрина (M) в II.
         var la := _u(Vector3(cos(pa) * 0.7, sin(pa) * 0.7, 0.85))
-        return [
+        out = [
             {"v": pdir * (pamp * 0.85), "c": pd * 0.34, "s": maxf(pd * 0.26, 7.0)},
             {"v": la * (pamp * 0.85), "c": pd * 0.72, "s": maxf(pd * 0.30, 8.0)},
         ]
-    return [{"v": pdir * pamp, "c": pd * 0.5, "s": maxf(pd * 0.30, 7.0)}]
+    else:
+        out = [{"v": pdir * pamp, "c": pd * 0.5, "s": maxf(pd * 0.30, 7.0)}]
+    # Депрессия PR-сегмента (перикардит): Ta-волна (реполяризация предсердий)
+    # противоположна P → депрессия PR в большинстве отведений, элевация в aVR.
+    var pr_dep := float(p.get("pr_dep", 0.0))
+    if pr_dep > 0.0:
+        out.append({"v": -pdir * pr_dep, "c": pd * 1.15, "s": maxf(pd * 0.5, 30.0)})
+    return out
 
 # ---------- сегменты желудочков (активация по His-Пуркинье) ----------
 static var _SEG: Array = []
@@ -463,7 +471,25 @@ static func _beat_components(p: Dictionary, kind: String) -> Dictionary:
     # ПЖ-сил, так что измеренная ось ≈ параметру. Чисто фронтальная часть (X,Y) правит
     # ось, задняя (-Z) — грудные. Только для kind=="n" (блокады/эктопия — своя форма).
     if kind == "n":
-        comps.append({"v": _u(Vector3(0.70, 0.10, -0.70)) * (main_amp * 0.50), "c": m_mid - 6.0, "s": msig * 0.9})
+        var ant_dir := _u(Vector3(0.70, 0.10, -0.70))
+        var ant_scale := 1.0
+        var nvec := st_vec(p)
+        if absf(float(p["q_amp"])) > 1.8 and nvec.length() > 0.3:
+            # Некроз гасит R в направлении повреждённой стенки: передний ИМ → потеря
+            # передних R-сил → QS в V1-V3 (align высок для переднего, мал для нижнего).
+            var align := maxf(0.0, ant_dir.dot(nvec.normalized()))
+            ant_scale = clampf(1.0 - 1.1 * align * clampf(float(p["q_amp"]) / 3.5, 0.0, 1.2), 0.0, 1.0)
+        comps.append({"v": ant_dir * (main_amp * 0.50 * ant_scale), "c": m_mid - 6.0, "s": msig * 0.9})
+        # WPW: дельта-волна — медленный смазанный начальный подъём (предвозбуждение).
+        var delta_amp := float(p.get("delta_amp", 0.0))
+        if delta_amp > 0.0:
+            comps.append({"v": _u(Vector3(cos(a), sin(a), 0.20)) * (main_amp * delta_amp), "c": qon - 10.0, "s": 20.0})
+
+    # J-волна (ранняя реполяризация / синдром J-волны): зазубрина на конце QRS,
+    # нижне-боковая (II/III/aVF/V4-V6).
+    var j_wave := float(p.get("j_wave", 0.0))
+    if j_wave > 0.0:
+        comps.append({"v": _u(Vector3(0.4, 0.7, -0.1)) * j_wave, "c": qoff + 6.0, "s": 7.0})
 
     var j := qoff + 18.0
     var stt := maxf(qt - qeff, 120.0)
@@ -491,6 +517,12 @@ static func _beat_components(p: Dictionary, kind: String) -> Dictionary:
         # ПНПГ: вторичная дискордантная инверсия T в правых грудных (V1-V3) —
         # вектор кзади (+Z), противоположно терминальным силам ПЖ; лимб/V6 не трогает.
         comps.append({"v": _u(Vector3(0.10, 0.0, 1.0)) * (tamp * 1.1), "c": t_pk, "s": t_sig})
+
+    # Задний T-вектор (+Z): инверсия T в правых/передних грудных V1-V4 без изменения
+    # лимб/боковых — Wellens (глубокий симметричный T) и Бругада (инверсия в V1-V2).
+    var t_post := float(p.get("t_post", 0.0))
+    if t_post > 0.0:
+        comps.append({"v": _u(Vector3(0.10, 0.0, 1.0)) * t_post, "c": t_pk, "s": t_sig})
 
     # U-волна (выражена при гипокалиемии): после T, конкордантна T, малой амплитуды.
     var u_amp := float(p.get("u_amp", 0.0))
@@ -541,6 +573,8 @@ static func _render_one(p: Dictionary, lead: int, ev: Dictionary, bs: Dictionary
     var sv := st_vec(p)
     var pst := lv.dot(sv)
     var pd_lim := float(p["p_dur"]) + 40.0
+    if float(p.get("pr_dep", 0.0)) > 0.0:
+        pd_lim = maxf(pd_lim, float(p["pr"]))  # Ta-волна тянется до QRS (депрессия PR)
     var qt_lim := float(p["qt"]) + 160.0
 
     var pp: Array = []
@@ -804,6 +838,19 @@ static func pathology_probabilities(p: Dictionary, s: Dictionary) -> Array:
     if paced: out.append({"name": "Ритм электрокардиостимулятора", "prob": 0.9})
     if rhythm == "sinus" and float(p.get("pvc_rate", 0.0)) > 0.0:
         out.append({"name": "Желудочковые экстрасистолы (ЖЭ)", "prob": 0.85})
+
+    # Распознавание синдромов по характерным признакам морфологии.
+    if float(p.get("delta_amp", 0.0)) > 0.0 and float(p["pr"]) < 120.0:
+        out.append({"name": "WPW (предвозбуждение)", "prob": 0.9})
+    if float(p.get("pr_dep", 0.0)) > 0.0:
+        out.append({"name": "Перикардит (диффузный)", "prob": 0.85})
+    if float(p.get("j_wave", 0.0)) > 0.0:
+        out.append({"name": "Ранняя реполяризация", "prob": 0.78})
+    if float(p.get("t_post", 0.0)) > 0.0:
+        if ste.x >= 0.7:
+            out.append({"name": "Синдром Бругада (тип 1)", "prob": 0.85})
+        else:
+            out.append({"name": "Синдром Wellens (стеноз ПМЖВ)", "prob": 0.85})
 
     # Центры сигмоид = клинические пороги THR (50% уверенности на пороге);
     # ворота (gate) — порог минус запас, чтобы пограничные случаи попадали в дифференциал.
