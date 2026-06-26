@@ -446,6 +446,13 @@ static func _beat_components(p: Dictionary, kind: String) -> Dictionary:
         tdir = _u(Vector3(cos(ta), sin(ta), 0.30))
     var tamp := absf(float(p["t_amp"]))
     if wide: tamp = maxf(tamp, 5.0)
+    if block == 0:
+        # ПЛНПГ: вторичный ДИСКОРДАНТНЫЙ T, противоположный главному вектору ЛЖ;
+        # амплитуда пропорциональна QRS (глубже при высоком R) → инверсия T в
+        # I/aVL/V5-V6, положительный в V1-V3. (Первичный T по Вилсону уже даёт верное
+        # направление, но мелкое и не масштабируется с R — задаём явно.)
+        tdir = -_u(Vector3(cos(a), sin(a), 0.45))
+        tamp = maxf(tamp, main_amp * 0.42)
     comps.append({"v": tdir * tamp, "c": t_pk, "s": t_sig})
     if block == 1:
         # ПНПГ: вторичная дискордантная инверсия T в правых грудных (V1-V3) —
