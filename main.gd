@@ -10,14 +10,14 @@ const DEFAULTS := {
     "pace_fault": "none", "pvc_rate": 0.0, "pvc_focus": "lv_lat_mid",
     "resp_arr": 0.06, "baseline_wander": 0.0, "mains_noise": 0.0,
     "st_shape": 0.0, "p_morph": "normal",
-    "delta_amp": 0.0, "j_wave": 0.0, "t_post": 0.0, "pr_dep": 0.0,
+    "delta_amp": 0.0, "j_wave": 0.0, "t_post": 0.0, "pr_dep": 0.0, "strain": 0.0, "rv_boost": 0.0,
 }
 const STATE_DEFAULTS := {
     "k": 4.0, "ca": 2.4, "mg": 0.85, "na": 140.0,
     "bp_sys": 120.0, "bp_dia": 80.0,
 }
-const RHYTHM_NAMES := ["Синусовый", "Фибрилляция предсердий", "Желудочковая тахикардия", "Тахикардия пируэт (Torsades)", "Полная AV-блокада", "ЭКС желудочковый (VVI)", "ЭКС предсердный (AAI)", "ЭКС двухкамерный (DDD)", "ЭКС бивентрикулярный (BiV/CRT)"]
-const RHYTHM_VALUES := ["sinus", "afib", "vtach", "torsades", "av3", "pace_vvi", "pace_aai", "pace_ddd", "pace_biv"]
+const RHYTHM_NAMES := ["Синусовый", "Фибрилляция предсердий", "Желудочковая тахикардия", "Тахикардия пируэт (Torsades)", "AV-блокада 2 ст. Мобитц I (Венкебах)", "AV-блокада 2 ст. Мобитц II", "Полная AV-блокада", "ЭКС желудочковый (VVI)", "ЭКС предсердный (AAI)", "ЭКС двухкамерный (DDD)", "ЭКС бивентрикулярный (BiV/CRT)"]
+const RHYTHM_VALUES := ["sinus", "afib", "vtach", "torsades", "wenckebach", "mobitz2", "av3", "pace_vvi", "pace_aai", "pace_ddd", "pace_biv"]
 const PACE_FAULT_NAMES := ["ЭКС: норма", "Потеря захвата", "Undersensing (асинхронно)"]
 const PACE_FAULT_VALUES := ["none", "loss_capture", "undersense"]
 const PVC_NAMES := ["Нет", "Редкие", "Частые"]
@@ -52,6 +52,9 @@ const PRESETS := [
     {"name": "Инфаркт нижний (STEMI)", "p": {"st_y": 3.0, "q_amp": 3.0, "st_shape": 1.0}, "s": {}},
     {"name": "Инфаркт передний (STEMI)", "p": {"st_z": -3.0, "q_amp": 3.5, "st_shape": 1.0}, "s": {}},
     {"name": "ГЛЖ (гипертрофия ЛЖ)", "p": {"r_amp": 28.0, "s_amp": 14.0, "qrs_axis": -20.0}, "s": {"bp_sys": 185.0}},
+    {"name": "ГЛЖ с перегрузкой (strain)", "p": {"r_amp": 32.0, "s_amp": 18.0, "qrs_axis": -15.0, "strain": 4.5}, "s": {"bp_sys": 195.0}},
+    {"name": "ГПЖ с перегрузкой (strain)", "p": {"r_amp": 9.0, "s_amp": 14.0, "qrs_axis": 120.0, "strain": 3.5, "rv_boost": 3.2}, "s": {}},
+    {"name": "Инфаркт задний (зеркало V1-V2)", "p": {"st_z": 2.6, "q_amp": 3.2}, "s": {}},
     {"name": "Блокада ЛНПГ", "p": {"bbb": "lbbb", "qrs_dur": 150.0, "qrs_axis": -30.0}, "s": {}},
     {"name": "Блокада ПНПГ", "p": {"bbb": "rbbb", "qrs_dur": 140.0}, "s": {}},
     {"name": "AV-блокада 1 ст.", "p": {"pr": 280.0}, "s": {}},
@@ -803,7 +806,7 @@ func _refresh_edit() -> void:
     edit_view.st_level = ECGModel.st_level_lead(params, selected_lead)
     edit_view.rr_ms = 60000.0 / maxf(float(_last_eff.get("hr", 75.0)), 20.0)
     var rh := str(_last_eff.get("rhythm", "sinus"))
-    var hp := (rh == "sinus" or rh == "av3" or rh == "pace_aai" or rh == "pace_ddd")
+    var hp := (rh == "sinus" or rh == "av3" or rh == "wenckebach" or rh == "mobitz2" or rh == "pace_aai" or rh == "pace_ddd")
     edit_view.has_p = hp and float(params.get("p_amp", 0.0)) > 0.2
     edit_view.queue_redraw()
 
@@ -995,6 +998,12 @@ func _recompute() -> void:
     elif rhythm == "torsades":
         primary_dx = "Тахикардия пируэт (Torsades)"
         primary_conf = 0.95
+    elif rhythm == "wenckebach":
+        primary_dx = "AV-блокада 2 ст. Мобитц I (Венкебах)"
+        primary_conf = 0.9
+    elif rhythm == "mobitz2":
+        primary_dx = "AV-блокада 2 ст. Мобитц II"
+        primary_conf = 0.9
     elif rhythm == "av3":
         primary_dx = "Полная AV-блокада (диссоциация)"
         primary_conf = 0.9

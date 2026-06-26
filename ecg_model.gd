@@ -135,6 +135,34 @@ static func _gen_events(p: Dictionary, window: float = WINDOW_MS) -> Dictionary:
             vent.append({"t": tv, "kind": "vt"})
             tv += esc
         return {"atrial": atrial, "vent": vent, "afib": false}
+    elif rhythm == "wenckebach":
+        # AV-блокада 2 ст., Мобитц I: PR прогрессивно удлиняется, пока QRS не выпадает
+        # (P без QRS), затем цикл повторяется. 4:3 (выпадает каждый 4-й).
+        var pr0 := float(p["pr"])
+        var cyc := 4
+        var taw := 0.0
+        var bw := 0
+        while taw < window:
+            atrial.append(taw)
+            var nph := bw % cyc
+            if nph < cyc - 1:
+                vent.append({"t": taw + pr0 + nph * 55.0, "kind": nkind})
+            taw += rr
+            bw += 1
+        return {"atrial": atrial, "vent": vent, "afib": false}
+    elif rhythm == "mobitz2":
+        # AV-блокада 2 ст., Мобитц II: PR постоянный, периодически внезапно выпадает
+        # QRS (непроведённый P). 3:2 (выпадает каждый 3-й).
+        var pr2 := float(p["pr"])
+        var tam := 0.0
+        var bm := 0
+        while tam < window:
+            atrial.append(tam)
+            if (bm + 1) % 3 != 0:
+                vent.append({"t": tam + pr2, "kind": nkind})
+            tam += rr
+            bm += 1
+        return {"atrial": atrial, "vent": vent, "afib": false}
     elif rhythm == "pace_vvi":
         var fault := str(p.get("pace_fault", "none"))
         var spk_v: Array = []
@@ -460,6 +488,7 @@ static func _beat_components(p: Dictionary, kind: String) -> Dictionary:
 
     var rv_amp := main_amp * 0.30
     if block == 1: rv_amp = main_amp * 0.62
+    rv_amp *= (1.0 + float(p.get("rv_boost", 0.0)))  # ГПЖ: усиление передне-правых сил → доминантный R в V1
     var rsig := maxf((rvr.z - rvr.x) * 0.4, 6.0)
     if wide: rsig = maxf(rsig, 10.0)
     comps.append({"v": _u(Vector3(-0.70, -0.05, -0.55)) * rv_amp, "c": rvr.y, "s": rsig})
@@ -506,12 +535,18 @@ static func _beat_components(p: Dictionary, kind: String) -> Dictionary:
     if wide: tamp = maxf(tamp, 5.0)
     var t_sharp := maxf(float(p.get("t_sharp", 1.0)), 1.0)  # заострение T (гиперкалиемия)
     t_sig = t_sig / t_sharp
+    var strain := float(p.get("strain", 0.0))
     if block == 0 or kind == "paced" or kind == "biv":
         # Широкий комплекс с поздней активацией ЛЖ (ПЛНПГ, ЭКС из ПЖ, BiV): вторичный
         # ДИСКОРДАНТНЫЙ T, противоположный главному вектору; амплитуда пропорциональна
         # QRS (глубже при высоком R) → инверсия T в I/aVL/V5-V6, положительный в V1-V3.
         tdir = -_u(Vector3(cos(a), sin(a), 0.45))
         tamp = maxf(tamp, main_amp * 0.42)
+    elif strain > 0.0 and kind == "n":
+        # Перегрузка (strain) при гипертрофии: вторичная инверсия T против главного
+        # вектора в отведениях с высоким R (ГЛЖ: I/aVL/V5-V6; ГПЖ: V1-V3).
+        tdir = -_u(Vector3(cos(a), sin(a), 0.30))
+        tamp = maxf(tamp * 0.5, strain)
     comps.append({"v": tdir * tamp, "c": t_pk, "s": t_sig})
     if block == 1:
         # ПНПГ: вторичная дискордантная инверсия T в правых грудных (V1-V3) —
@@ -572,6 +607,11 @@ static func _render_one(p: Dictionary, lead: int, ev: Dictionary, bs: Dictionary
     var lv: Vector3 = LEADVEC[lead]
     var sv := st_vec(p)
     var pst := lv.dot(sv)
+    var strain := float(p.get("strain", 0.0))
+    if strain > 0.0:
+        # Косонисходящая депрессия ST в отведениях с высоким R (перегрузка): ST против
+        # главного вектора, поэтому ГЛЖ даёт депрессию в I/aVL/V5-V6, ГПЖ — в V1-V3.
+        pst += lv.dot(main_dir(p)) * (-strain * 0.4)
     var pd_lim := float(p["p_dur"]) + 40.0
     if float(p.get("pr_dep", 0.0)) > 0.0:
         pd_lim = maxf(pd_lim, float(p["pr"]))  # Ta-волна тянется до QRS (депрессия PR)
@@ -833,6 +873,8 @@ static func pathology_probabilities(p: Dictionary, s: Dictionary) -> Array:
     if rhythm == "afib": out.append({"name": "Фибрилляция предсердий", "prob": 0.96})
     elif rhythm == "vtach": out.append({"name": "Желудочковая тахикардия", "prob": 0.97})
     elif rhythm == "torsades": out.append({"name": "Пируэтная тахикардия (Torsades)", "prob": 0.97})
+    elif rhythm == "wenckebach": out.append({"name": "AV-блокада 2 ст. Мобитц I (Венкебах)", "prob": 0.93})
+    elif rhythm == "mobitz2": out.append({"name": "AV-блокада 2 ст. Мобитц II", "prob": 0.93})
     elif rhythm == "av3": out.append({"name": "Полная AV-блокада", "prob": 0.95})
     var paced := rhythm.begins_with("pace")
     if paced: out.append({"name": "Ритм электрокардиостимулятора", "prob": 0.9})
@@ -851,6 +893,8 @@ static func pathology_probabilities(p: Dictionary, s: Dictionary) -> Array:
             out.append({"name": "Синдром Бругада (тип 1)", "prob": 0.85})
         else:
             out.append({"name": "Синдром Wellens (стеноз ПМЖВ)", "prob": 0.85})
+    if float(p.get("strain", 0.0)) > 0.0:
+        out.append({"name": "Гипертрофия с перегрузкой (strain)", "prob": 0.82})
 
     # Центры сигмоид = клинические пороги THR (50% уверенности на пороге);
     # ворота (gate) — порог минус запас, чтобы пограничные случаи попадали в дифференциал.
@@ -906,6 +950,10 @@ static func ecg_report(p: Dictionary, sok: Dictionary, axis_lbl: String, res: Di
         line1 = "Ритм: желудочковая тахикардия, ЧСС %d, широкие комплексы без P." % hr
     elif rhythm == "torsades":
         line1 = "Ритм: пируэтная тахикардия (Torsades) — полиморфная ЖТ с вращением оси на фоне длинного QT."
+    elif rhythm == "wenckebach":
+        line1 = "Ритм: AV-блокада 2 ст. Мобитц I (Венкебах) — PR прогрессивно удлиняется до выпадения QRS (предсердия %d)." % hr
+    elif rhythm == "mobitz2":
+        line1 = "Ритм: AV-блокада 2 ст. Мобитц II — PR постоянный, периодически выпадает QRS (предсердия %d)." % hr
     elif rhythm == "av3":
         line1 = "Ритм: полная АВ-блокада, предсердия %d / желудочки ~40 (диссоциация)." % hr
     elif rhythm == "pace_vvi":
