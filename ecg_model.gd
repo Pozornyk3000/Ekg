@@ -240,9 +240,23 @@ static func _gen_events(p: Dictionary, window: float = WINDOW_MS) -> Dictionary:
 # ---------- компоненты сердечного вектора одного сокращения ----------
 static func _p_components(p: Dictionary) -> Array:
     var pd := float(p["p_dur"])
+    var pamp := float(p["p_amp"])
     var pa := deg_to_rad(60.0)
     var pdir := _u(Vector3(cos(pa), sin(pa), 0.10))
-    return [{"v": pdir * float(p["p_amp"]), "c": pd * 0.5, "s": maxf(pd * 0.30, 7.0)}]
+    var morph := str(p.get("p_morph", "normal"))
+    if morph == "pulmonale":
+        # P-pulmonale (ГПП): высокий заострённый P, ось чуть «нижнее».
+        var pdp := _u(Vector3(cos(deg_to_rad(75.0)), sin(deg_to_rad(75.0)), 0.05))
+        return [{"v": pdp * (pamp * 1.5), "c": pd * 0.45, "s": maxf(pd * 0.22, 6.0)}]
+    elif morph == "mitrale":
+        # P-mitrale (ГЛП): широкий двугорбый P; терминальная часть кзади (+Z) →
+        # двухфазный P в V1 с глубокой отрицательной фазой, зазубрина (M) в II.
+        var la := _u(Vector3(cos(pa) * 0.7, sin(pa) * 0.7, 0.85))
+        return [
+            {"v": pdir * (pamp * 0.85), "c": pd * 0.34, "s": maxf(pd * 0.26, 7.0)},
+            {"v": la * (pamp * 0.85), "c": pd * 0.72, "s": maxf(pd * 0.30, 8.0)},
+        ]
+    return [{"v": pdir * pamp, "c": pd * 0.5, "s": maxf(pd * 0.30, 7.0)}]
 
 # ---------- сегменты желудочков (активация по His-Пуркинье) ----------
 static var _SEG: Array = []
@@ -421,6 +435,14 @@ static func _beat_components(p: Dictionary, kind: String) -> Dictionary:
     if block == 0 or focus.begins_with("lv") or biv: samp *= -0.2
     comps.append({"v": _u(Vector3(-0.55, -0.20, -0.45)) * samp, "c": s_mid, "s": 7.0})
 
+    # Патологический Q инфаркта: вектор некроза направлен ОТ зоны повреждения
+    # (против ST-вектора) → Q появляется в тех же отведениях, что и подъём ST,
+    # территориально верно (нижний/передний/боковой). Только при норм. проведении.
+    if kind == "n":
+        var nv := st_vec(p)
+        if absf(float(p["q_amp"])) > 1.8 and nv.length() > 0.3:
+            comps.append({"v": -nv.normalized() * (float(p["q_amp"]) * 0.9), "c": qon + 5.0, "s": 6.0})
+
     var msig := maxf((m_max - s_mid) * 0.30, 6.0)
     var mamp := main_amp
     if wide:
@@ -456,6 +478,8 @@ static func _beat_components(p: Dictionary, kind: String) -> Dictionary:
         tdir = _u(Vector3(cos(ta), sin(ta), 0.30))
     var tamp := absf(float(p["t_amp"]))
     if wide: tamp = maxf(tamp, 5.0)
+    var t_sharp := maxf(float(p.get("t_sharp", 1.0)), 1.0)  # заострение T (гиперкалиемия)
+    t_sig = t_sig / t_sharp
     if block == 0 or kind == "paced" or kind == "biv":
         # Широкий комплекс с поздней активацией ЛЖ (ПЛНПГ, ЭКС из ПЖ, BiV): вторичный
         # ДИСКОРДАНТНЫЙ T, противоположный главному вектору; амплитуда пропорциональна
@@ -467,6 +491,12 @@ static func _beat_components(p: Dictionary, kind: String) -> Dictionary:
         # ПНПГ: вторичная дискордантная инверсия T в правых грудных (V1-V3) —
         # вектор кзади (+Z), противоположно терминальным силам ПЖ; лимб/V6 не трогает.
         comps.append({"v": _u(Vector3(0.10, 0.0, 1.0)) * (tamp * 1.1), "c": t_pk, "s": t_sig})
+
+    # U-волна (выражена при гипокалиемии): после T, конкордантна T, малой амплитуды.
+    var u_amp := float(p.get("u_amp", 0.0))
+    if u_amp > 0.01:
+        var t_dir_u := tdir if tdir.length() > 0.001 else _u(Vector3(cos(ta), sin(ta), 0.30))
+        comps.append({"v": t_dir_u * u_amp, "c": t_pk + maxf(t_sig * 1.8, 55.0), "s": maxf(t_sig * 0.9, 14.0)})
 
     return {"comps": comps, "j": j, "t_on": t_on, "qeff": qeff}
 
@@ -531,6 +561,7 @@ static func _render_one(p: Dictionary, lead: int, ev: Dictionary, bs: Dictionary
     var idx: Array = bs["idx"]
     var spikes: Array = ev.get("spikes", [])
     var sp_proj := lv.dot(_SPIKE_VEC.normalized()) * _SPIKE_AMP
+    var st_shape := float(p.get("st_shape", 0.0))  # +1 выпуклый (STEMI), -1 корытом (дигоксин)
     # Скользящие окна активных событий: события отсортированы по времени, ts растёт,
     # ширина окна постоянна — значит активный набор непрерывен. Это убирает
     # внутренний цикл по всем ударам на каждый отсчёт (было O(отсчёты × удары)).
@@ -565,6 +596,11 @@ static func _render_one(p: Dictionary, lead: int, ev: Dictionary, bs: Dictionary
             var pl := _plateau(tau2, sp["j"], sp["t_on"])
             if pl > 0.0:
                 v += pst * pl
+                # Форма сегмента ST: выпуклая (STEMI «надгробие») / корытообразная
+                # (дигоксин). Кривизна ∝ уровню ST, поэтому реципрокные отв. зеркалят.
+                if st_shape != 0.0 and absf(pst) > 0.05:
+                    var ph := (tau2 - sp["j"]) / maxf(sp["t_on"] - sp["j"], 1.0)
+                    v += st_shape * 0.6 * pst * (4.0 * ph * (1.0 - ph)) * pl
             ei += 1
         while s_start < nsp and ts - float(spikes[s_start]) > 14.0:
             s_start += 1

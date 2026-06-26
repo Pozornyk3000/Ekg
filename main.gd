@@ -9,6 +9,7 @@ const DEFAULTS := {
     "qrs_axis": 60.0, "t_axis": 45.0, "rhythm": "sinus", "bbb": "none", "vt_focus": "lv_lat_mid",
     "pace_fault": "none", "pvc_rate": 0.0, "pvc_focus": "lv_lat_mid",
     "resp_arr": 0.06, "baseline_wander": 0.0, "mains_noise": 0.0,
+    "st_shape": 0.0, "p_morph": "normal",
 }
 const STATE_DEFAULTS := {
     "k": 4.0, "ca": 2.4, "mg": 0.85, "na": 140.0,
@@ -27,7 +28,7 @@ const FOCUS_VALUES := ["lv_lat_mid", "lv_lat_ap", "sep_mid", "rv_mid", "rv_out"]
 
 # Препараты: d/sd — терапевтическая доза; td/tsd — ДОБАВКА при токсической; trhythm — аритмия при токсичности.
 const DRUGS := [
-    {"name": "Дигоксин", "d": {"qt": -35.0, "pr": 25.0, "hr": -10.0, "t_amp": -1.5}, "sd": {}, "td": {"pr": 45.0, "hr": -18.0}, "tsd": {}, "trhythm": "av3", "desc": "тер: ↓QT, ↑PR, корытообразная ST. токс: AV-блокада, аритмии"},
+    {"name": "Дигоксин", "d": {"qt": -35.0, "pr": 25.0, "hr": -10.0, "t_amp": -1.5, "st_x": -0.5, "st_y": -0.3, "st_shape": -1.0}, "sd": {}, "td": {"pr": 45.0, "hr": -18.0}, "tsd": {}, "trhythm": "av3", "desc": "тер: ↓QT, ↑PR, корытообразная ST. токс: AV-блокада, аритмии"},
     {"name": "Амиодарон (III)", "d": {"qt": 60.0, "hr": -15.0, "qrs_dur": 8.0}, "sd": {}, "td": {"qt": 75.0, "hr": -12.0}, "tsd": {}, "trhythm": "", "desc": "тер: ↑↑QT, брадикардия. токс: ↑↑↑QT — риск Torsades"},
     {"name": "Соталол (III)", "d": {"qt": 55.0, "hr": -18.0}, "sd": {}, "td": {"qt": 80.0}, "tsd": {}, "trhythm": "", "desc": "тер: ↑↑QT, ↓ЧСС. токс: ↑↑↑QT — Torsades"},
     {"name": "Флекаинид (IC)", "d": {"qrs_dur": 35.0, "pr": 20.0, "qt": 15.0}, "sd": {}, "td": {"qrs_dur": 60.0}, "tsd": {}, "trhythm": "vtach", "desc": "тер: ↑↑QRS, ↑PR. токс: очень широкий QRS, ЖТ"},
@@ -47,8 +48,8 @@ const STENOSIS_NAMES := ["Нет стеноза", "Умеренный стено
 
 const PRESETS := [
     {"name": "Норма", "p": {}, "s": {}},
-    {"name": "Инфаркт нижний (STEMI)", "p": {"st_y": 3.0, "q_amp": 3.0}, "s": {}},
-    {"name": "Инфаркт передний (STEMI)", "p": {"st_z": -3.0}, "s": {}},
+    {"name": "Инфаркт нижний (STEMI)", "p": {"st_y": 3.0, "q_amp": 3.0, "st_shape": 1.0}, "s": {}},
+    {"name": "Инфаркт передний (STEMI)", "p": {"st_z": -3.0, "q_amp": 3.5, "st_shape": 1.0}, "s": {}},
     {"name": "ГЛЖ (гипертрофия ЛЖ)", "p": {"r_amp": 28.0, "s_amp": 14.0, "qrs_axis": -20.0}, "s": {"bp_sys": 185.0}},
     {"name": "Блокада ЛНПГ", "p": {"bbb": "lbbb", "qrs_dur": 150.0, "qrs_axis": -30.0}, "s": {}},
     {"name": "Блокада ПНПГ", "p": {"bbb": "rbbb", "qrs_dur": 140.0}, "s": {}},
@@ -65,6 +66,8 @@ const PRESETS := [
     {"name": "Гиперкалиемия", "p": {}, "s": {"k": 7.0}},
     {"name": "Гипокалиемия", "p": {}, "s": {"k": 2.5}},
     {"name": "Гипокальциемия (long QT)", "p": {}, "s": {"ca": 1.7}},
+    {"name": "P-mitrale (ГЛП, двугорбый P)", "p": {"p_morph": "mitrale", "p_dur": 145.0, "p_amp": 2.0}, "s": {}},
+    {"name": "P-pulmonale (ГПП, высокий P)", "p": {"p_morph": "pulmonale", "p_amp": 2.8}, "s": {}},
     {"name": "Желудочковые экстрасистолы (ЖЭ)", "p": {"rhythm": "sinus", "pvc_rate": 14.0}, "s": {}},
     {"name": "ЭКС бивентрикулярный (CRT)", "p": {"rhythm": "pace_biv", "hr": 70.0, "qrs_axis": -120.0, "p_amp": 1.0}, "s": {}},
     {"name": "ЭКС: потеря захвата", "p": {"rhythm": "pace_vvi", "hr": 70.0, "pace_fault": "loss_capture", "p_amp": 0.0}, "s": {}},
