@@ -219,6 +219,7 @@ static func _gen_events(p: Dictionary, window: float = WINDOW_MS) -> Dictionary:
         # Синус (+ опц. желудочковые экстрасистолы). pvc_rate — ЖЭ в минуту.
         var pvc_rate := float(p.get("pvc_rate", 0.0))
         var pvc_prob := clampf(pvc_rate / maxf(hr, 1.0), 0.0, 0.85) if pvc_rate > 0.0 else 0.0
+        var resp := clampf(float(p.get("resp_arr", 0.0)), 0.0, 0.25)  # дыхательная аритмия
         var has_pvc := false
         var ats := 0.0
         while ats < window:
@@ -229,7 +230,9 @@ static func _gen_events(p: Dictionary, window: float = WINDOW_MS) -> Dictionary:
                 if pvc_t < window:
                     vent.append({"t": pvc_t, "kind": "pvc"})
                     has_pvc = true
-            ats += rr
+            # RR удлиняется на выдохе / укорачивается на вдохе (~15 дых/мин)
+            var rr_i := rr * (1.0 + resp * sin(TAU * (ats / 1000.0) * 0.25)) if resp > 0.0 else rr
+            ats += rr_i
         if has_pvc:
             vent.sort_custom(func(x, y): return float(x["t"]) < float(y["t"]))
         return {"atrial": atrial, "vent": vent, "afib": false}
@@ -453,11 +456,10 @@ static func _beat_components(p: Dictionary, kind: String) -> Dictionary:
         tdir = _u(Vector3(cos(ta), sin(ta), 0.30))
     var tamp := absf(float(p["t_amp"]))
     if wide: tamp = maxf(tamp, 5.0)
-    if block == 0:
-        # ПЛНПГ: вторичный ДИСКОРДАНТНЫЙ T, противоположный главному вектору ЛЖ;
-        # амплитуда пропорциональна QRS (глубже при высоком R) → инверсия T в
-        # I/aVL/V5-V6, положительный в V1-V3. (Первичный T по Вилсону уже даёт верное
-        # направление, но мелкое и не масштабируется с R — задаём явно.)
+    if block == 0 or kind == "paced" or kind == "biv":
+        # Широкий комплекс с поздней активацией ЛЖ (ПЛНПГ, ЭКС из ПЖ, BiV): вторичный
+        # ДИСКОРДАНТНЫЙ T, противоположный главному вектору; амплитуда пропорциональна
+        # QRS (глубже при высоком R) → инверсия T в I/aVL/V5-V6, положительный в V1-V3.
         tdir = -_u(Vector3(cos(a), sin(a), 0.45))
         tamp = maxf(tamp, main_amp * 0.42)
     comps.append({"v": tdir * tamp, "c": t_pk, "s": t_sig})
@@ -591,7 +593,23 @@ static func generate_all(p: Dictionary) -> Dictionary:
 static func generate_monitor(p: Dictionary, lead: int, total_ms: float, n: int) -> PackedFloat32Array:
     var ev := _gen_events(p, total_ms)
     var bs := _build_beatsets(p, ev)
-    return _render_one(p, lead, ev, bs, n, total_ms)
+    var buf := _render_one(p, lead, ev, bs, n, total_ms)
+    _add_artifacts(buf, p, lead, total_ms, n)
+    return buf
+
+# Артефакты живого монитора (на сетку 12 отведений/анализ НЕ наносятся — она чистая).
+static func _add_artifacts(buf: PackedFloat32Array, p: Dictionary, lead: int, total_ms: float, n: int) -> void:
+    var wander := float(p.get("baseline_wander", 0.0))  # дрейф изолинии, мм
+    var mains := float(p.get("mains_noise", 0.0))        # сетевая наводка 50 Гц, мм
+    if wander <= 0.0 and mains <= 0.0:
+        return
+    var phase := float(lead) * 0.7
+    for i in n:
+        var t := i / float(n) * total_ms / 1000.0
+        if wander > 0.0:
+            buf[i] += wander * (sin(TAU * 0.22 * t + phase) + 0.4 * sin(TAU * 0.11 * t + phase * 1.7))
+        if mains > 0.0:
+            buf[i] += mains * sin(TAU * 50.0 * t + phase)
 
 # Один лид в стандартном окне — для интерактивной правки (лёгкий пересчёт при перетаскивании).
 static func generate_lead(p: Dictionary, lead: int) -> PackedFloat32Array:

@@ -8,6 +8,7 @@ const DEFAULTS := {
     "st_x": 0.0, "st_y": 0.0, "st_z": 0.0, "qt": 380.0, "t_amp": 4.0,
     "qrs_axis": 60.0, "t_axis": 45.0, "rhythm": "sinus", "bbb": "none", "vt_focus": "lv_lat_mid",
     "pace_fault": "none", "pvc_rate": 0.0, "pvc_focus": "lv_lat_mid",
+    "resp_arr": 0.06, "baseline_wander": 0.0, "mains_noise": 0.0,
 }
 const STATE_DEFAULTS := {
     "k": 4.0, "ca": 2.4, "mg": 0.85, "na": 140.0,
@@ -226,6 +227,11 @@ func _build_monitor_tab(tabs: TabContainer) -> void:
     pvc_opt.item_selected.connect(_on_pvc)
     col.add_child(pvc_opt)
 
+    _mk_label(col, "Реализм сигнала (живой монитор):", 14)
+    _add_artifact_check(col, "Дыхательная аритмия (вариабельность RR)", "resp_arr", 0.06, true)
+    _add_artifact_check(col, "Дрейф изолинии", "baseline_wander", 0.8, false)
+    _add_artifact_check(col, "Сетевая наводка 50 Гц", "mains_noise", 0.15, false)
+
     rate_label = Label.new()
     rate_label.add_theme_font_size_override("font_size", 16)
     col.add_child(rate_label)
@@ -411,6 +417,18 @@ func _mk_label(parent: Node, text: String, fs: int) -> void:
     l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
     l.text = text
     parent.add_child(l)
+
+func _add_artifact_check(parent: Node, title: String, key: String, on_value: float, default_on: bool) -> void:
+    var cb := CheckBox.new()
+    cb.text = title
+    cb.add_theme_font_size_override("font_size", 14)
+    cb.custom_minimum_size = Vector2(0, 40)
+    cb.button_pressed = default_on
+    params[key] = on_value if default_on else 0.0
+    cb.toggled.connect(func(on: bool):
+        params[key] = on_value if on else 0.0
+        _recompute())
+    parent.add_child(cb)
 
 func _add_param(parent: Node, target: Dictionary, key: String, title: String, mn: float, mx: float, step: float, unit: String) -> void:
     var box := VBoxContainer.new()
