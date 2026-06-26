@@ -136,14 +136,62 @@ static func _gen_events(p: Dictionary, window: float = WINDOW_MS) -> Dictionary:
             tv += esc
         return {"atrial": atrial, "vent": vent, "afib": false}
     elif rhythm == "pace_vvi":
+        var fault := str(p.get("pace_fault", "none"))
         var spk_v: Array = []
         var rrv := 60000.0 / hr
-        var tpv := 0.0
-        while tpv < window:
-            vent.append({"t": tpv, "kind": "paced"})
-            spk_v.append(tpv - 6.0)
-            tpv += rrv
-        return {"atrial": [], "vent": vent, "afib": false, "spikes": spk_v}
+        if fault == "loss_capture":
+            # Потеря захвата: спайк есть, но QRS вызывает только часть стимулов.
+            var tlc := 0.0
+            var bi := 0
+            while tlc < window:
+                spk_v.append(tlc - 6.0)
+                if bi % 2 == 1:
+                    vent.append({"t": tlc, "kind": "paced"})
+                tlc += rrv
+                bi += 1
+            return {"atrial": [], "vent": vent, "afib": false, "spikes": spk_v}
+        elif fault == "undersense":
+            # Undersensing: ЭКС не видит собственный ритм и жёстко стимулирует со своей
+            # частотой; спайк вне рефрактерного периода захватывает, внутри — нет.
+            var intr := 60000.0 / maxf(float(p.get("intrinsic_hr", 50.0)), 25.0)
+            var ti := rng.randf_range(0.0, intr)
+            while ti < window:
+                vent.append({"t": ti, "kind": nkind})
+                ti += intr
+            var tus := rrv * 0.4
+            while tus < window:
+                spk_v.append(tus - 6.0)
+                var refractory := false
+                for vv in vent:
+                    if absf(float(vv["t"]) - tus) < 280.0:
+                        refractory = true
+                        break
+                if not refractory:
+                    vent.append({"t": tus, "kind": "paced"})
+                tus += rrv
+            vent.sort_custom(func(x, y): return float(x["t"]) < float(y["t"]))
+            return {"atrial": [], "vent": vent, "afib": false, "spikes": spk_v}
+        else:
+            var tpv := 0.0
+            while tpv < window:
+                vent.append({"t": tpv, "kind": "paced"})
+                spk_v.append(tpv - 6.0)
+                tpv += rrv
+            return {"atrial": [], "vent": vent, "afib": false, "spikes": spk_v}
+    elif rhythm == "pace_biv":
+        # Бивентрикулярная стимуляция (CRT): отслеживает синусовый P, стимулирует
+        # оба желудочка с коротким AV-интервалом → узкий «слитный» QRS, два спайка.
+        var spk_b: Array = []
+        var rrb := 60000.0 / hr
+        var avb := 120.0
+        var tpb := 0.0
+        while tpb < window:
+            atrial.append(tpb)
+            vent.append({"t": tpb + avb, "kind": "biv"})
+            spk_b.append(tpb + avb - 6.0)
+            spk_b.append(tpb + avb - 2.0)
+            tpb += rrb
+        return {"atrial": atrial, "vent": vent, "afib": false, "spikes": spk_b}
     elif rhythm == "pace_aai":
         var spk_a: Array = []
         var rra := 60000.0 / hr
@@ -168,11 +216,22 @@ static func _gen_events(p: Dictionary, window: float = WINDOW_MS) -> Dictionary:
             tpd += rrd
         return {"atrial": atrial, "vent": vent, "afib": false, "spikes": spk_d}
     else:
+        # Синус (+ опц. желудочковые экстрасистолы). pvc_rate — ЖЭ в минуту.
+        var pvc_rate := float(p.get("pvc_rate", 0.0))
+        var pvc_prob := clampf(pvc_rate / maxf(hr, 1.0), 0.0, 0.85) if pvc_rate > 0.0 else 0.0
+        var has_pvc := false
         var ats := 0.0
         while ats < window:
             atrial.append(ats)
             vent.append({"t": ats + float(p["pr"]), "kind": nkind})
+            if pvc_prob > 0.0 and rng.randf() < pvc_prob:
+                var pvc_t := ats + rr * 0.55  # преждевременный, после синусового QRS
+                if pvc_t < window:
+                    vent.append({"t": pvc_t, "kind": "pvc"})
+                    has_pvc = true
             ats += rr
+        if has_pvc:
+            vent.sort_custom(func(x, y): return float(x["t"]) < float(y["t"]))
         return {"atrial": atrial, "vent": vent, "afib": false}
 
 # ---------- компоненты сердечного вектора одного сокращения ----------
@@ -280,6 +339,36 @@ static func _activation(block: int, focus: String, qscale: float) -> Dictionary:
             if cand < tt[m]: tt[m] = cand
     return tt
 
+# Дейкстра с несколькими очагами (бивентрикулярная стимуляция: RV + LV одновременно).
+static func _activation_foci(foci: Array, qscale: float) -> Dictionary:
+    var segs := _segs()
+    var tt := {}
+    for s in segs:
+        tt[s["n"]] = INF
+    for f in foci:
+        if _SEGMAP.has(f):
+            tt[f] = 0.0
+    var visited := {}
+    for _i in range(segs.size()):
+        var best := ""
+        var bestv := INF
+        for s in segs:
+            var nm: String = s["n"]
+            if visited.has(nm): continue
+            if tt[nm] < bestv:
+                bestv = tt[nm]
+                best = nm
+        if best == "": break
+        visited[best] = true
+        if is_inf(bestv): continue
+        var pbest: Vector3 = _SEGMAP[best]["pos"]
+        for s2 in segs:
+            var m: String = s2["n"]
+            if visited.has(m): continue
+            var cand := bestv + pbest.distance_to(s2["pos"]) / _V_MUSCLE
+            if cand < tt[m]: tt[m] = cand
+    return tt
+
 static func _rtimes(tt: Dictionary, names: Array) -> Vector3:
     var mn := INF
     var mx := -INF
@@ -298,12 +387,15 @@ static func _beat_components(p: Dictionary, kind: String) -> Dictionary:
     var qt := float(p["qt"])
     var block := -1
     var focus := ""
+    var biv := false
     if kind == "lbbb": block = 0
     elif kind == "rbbb": block = 1
     elif kind == "vt": focus = str(p.get("vt_focus", "lv_lat_mid"))
+    elif kind == "pvc": focus = str(p.get("pvc_focus", "lv_lat_mid"))
     elif kind == "paced": focus = "rv_ap"
+    elif kind == "biv": biv = true
 
-    var tt := _activation(block, focus, float(p["qrs_dur"]) / 90.0)
+    var tt := _activation_foci(["rv_ap", "lv_lat_mid"], float(p["qrs_dur"]) / 90.0) if biv else _activation(block, focus, float(p["qrs_dur"]) / 90.0)
     var qon := INF
     var qoff := -INF
     for s in _segs():
@@ -311,7 +403,7 @@ static func _beat_components(p: Dictionary, kind: String) -> Dictionary:
         qon = minf(qon, tv)
         qoff = maxf(qoff, tv)
     var qeff := (qoff - qon) + 34.0
-    var wide := qeff > 120.0 or block >= 0 or focus != ""
+    var wide := qeff > 120.0 or block >= 0 or focus != "" or biv
 
     var s_mid := _rtimes(tt, _SEPT).y
     var lvr := _rtimes(tt, _LVFREE)
@@ -323,7 +415,7 @@ static func _beat_components(p: Dictionary, kind: String) -> Dictionary:
 
     var comps: Array = []
     var samp := float(p["q_amp"]) * 1.2
-    if block == 0 or focus.begins_with("lv"): samp *= -0.2
+    if block == 0 or focus.begins_with("lv") or biv: samp *= -0.2
     comps.append({"v": _u(Vector3(-0.55, -0.20, -0.45)) * samp, "c": s_mid, "s": 7.0})
 
     var msig := maxf((m_max - s_mid) * 0.30, 6.0)
@@ -355,6 +447,10 @@ static func _beat_components(p: Dictionary, kind: String) -> Dictionary:
     var tamp := absf(float(p["t_amp"]))
     if wide: tamp = maxf(tamp, 5.0)
     comps.append({"v": tdir * tamp, "c": t_pk, "s": t_sig})
+    if block == 1:
+        # ПНПГ: вторичная дискордантная инверсия T в правых грудных (V1-V3) —
+        # вектор кзади (+Z), противоположно терминальным силам ПЖ; лимб/V6 не трогает.
+        comps.append({"v": _u(Vector3(0.10, 0.0, 1.0)) * (tamp * 1.1), "c": t_pk, "s": t_sig})
 
     return {"comps": comps, "j": j, "t_on": t_on, "qeff": qeff}
 
@@ -638,6 +734,8 @@ static func pathology_probabilities(p: Dictionary, s: Dictionary) -> Array:
     elif rhythm == "av3": out.append({"name": "Полная AV-блокада", "prob": 0.95})
     var paced := rhythm.begins_with("pace")
     if paced: out.append({"name": "Ритм электрокардиостимулятора", "prob": 0.9})
+    if rhythm == "sinus" and float(p.get("pvc_rate", 0.0)) > 0.0:
+        out.append({"name": "Желудочковые экстрасистолы (ЖЭ)", "prob": 0.85})
 
     # Центры сигмоид = клинические пороги THR (50% уверенности на пороге);
     # ворота (gate) — порог минус запас, чтобы пограничные случаи попадали в дифференциал.
@@ -696,13 +794,23 @@ static func ecg_report(p: Dictionary, sok: Dictionary, axis_lbl: String, res: Di
     elif rhythm == "av3":
         line1 = "Ритм: полная АВ-блокада, предсердия %d / желудочки ~40 (диссоциация)." % hr
     elif rhythm == "pace_vvi":
-        line1 = "Ритм: ЭКС, желудочковая стимуляция (VVI), ЧСС %d. Спайк + широкий навязанный QRS, верхняя ось." % hr
+        var pf := str(p.get("pace_fault", "none"))
+        if pf == "loss_capture":
+            line1 = "Ритм: ЭКС (VVI), ЧСС %d — ПОТЕРЯ ЗАХВАТА: спайки без последующего QRS." % hr
+        elif pf == "undersense":
+            line1 = "Ритм: ЭКС (VVI), ЧСС %d — UNDERSENSING: спайки асинхронны собственному ритму." % hr
+        else:
+            line1 = "Ритм: ЭКС, желудочковая стимуляция (VVI), ЧСС %d. Спайк + широкий навязанный QRS, верхняя ось." % hr
     elif rhythm == "pace_aai":
         line1 = "Ритм: ЭКС, предсердная стимуляция (AAI), ЧСС %d. Спайк перед P, QRS узкий (проведение сохранено)." % hr
     elif rhythm == "pace_ddd":
         line1 = "Ритм: ЭКС, двухкамерная стимуляция (DDD), ЧСС %d. Спайк P + спайк QRS (AV-последовательно)." % hr
+    elif rhythm == "pace_biv":
+        line1 = "Ритм: ЭКС, бивентрикулярная стимуляция (BiV/CRT), ЧСС %d. Два спайка, узкий слитный QRS, R в aVR." % hr
     else:
         line1 = "Ритм: синусовый, ЧСС %d." % hr
+        if float(p.get("pvc_rate", 0.0)) > 0.0:
+            line1 += " Желудочковые экстрасистолы (широкие преждевременные комплексы без P)."
     var line2 := "Ось %s. PR %d, QRS %d, QTc %d мс." % [
         axis_lbl, roundi(float(p["pr"])), roundi(float(p.get("qrs_eff", p["qrs_dur"]))), roundi(float(res["qtc"]))]
     var extra: Array = []

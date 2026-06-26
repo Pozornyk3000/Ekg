@@ -7,13 +7,18 @@ const DEFAULTS := {
     "q_amp": 1.0, "r_amp": 12.0, "s_amp": 4.0, "qrs_dur": 90.0,
     "st_x": 0.0, "st_y": 0.0, "st_z": 0.0, "qt": 380.0, "t_amp": 4.0,
     "qrs_axis": 60.0, "t_axis": 45.0, "rhythm": "sinus", "bbb": "none", "vt_focus": "lv_lat_mid",
+    "pace_fault": "none", "pvc_rate": 0.0, "pvc_focus": "lv_lat_mid",
 }
 const STATE_DEFAULTS := {
     "k": 4.0, "ca": 2.4, "mg": 0.85, "na": 140.0,
     "bp_sys": 120.0, "bp_dia": 80.0,
 }
-const RHYTHM_NAMES := ["Синусовый", "Фибрилляция предсердий", "Желудочковая тахикардия", "Тахикардия пируэт (Torsades)", "Полная AV-блокада", "ЭКС желудочковый (VVI)", "ЭКС предсердный (AAI)", "ЭКС двухкамерный (DDD)"]
-const RHYTHM_VALUES := ["sinus", "afib", "vtach", "torsades", "av3", "pace_vvi", "pace_aai", "pace_ddd"]
+const RHYTHM_NAMES := ["Синусовый", "Фибрилляция предсердий", "Желудочковая тахикардия", "Тахикардия пируэт (Torsades)", "Полная AV-блокада", "ЭКС желудочковый (VVI)", "ЭКС предсердный (AAI)", "ЭКС двухкамерный (DDD)", "ЭКС бивентрикулярный (BiV/CRT)"]
+const RHYTHM_VALUES := ["sinus", "afib", "vtach", "torsades", "av3", "pace_vvi", "pace_aai", "pace_ddd", "pace_biv"]
+const PACE_FAULT_NAMES := ["ЭКС: норма", "Потеря захвата", "Undersensing (асинхронно)"]
+const PACE_FAULT_VALUES := ["none", "loss_capture", "undersense"]
+const PVC_NAMES := ["Нет", "Редкие", "Частые"]
+const PVC_RATES := [0.0, 8.0, 22.0]
 const BBB_NAMES := ["Без блокады ножки", "Блокада ЛНПГ", "Блокада ПНПГ"]
 const BBB_VALUES := ["none", "lbbb", "rbbb"]
 const FOCUS_NAMES := ["ЛЖ боковая", "ЛЖ верхушка", "Перегородка", "ПЖ свободная стенка", "Выносящий тракт ПЖ"]
@@ -59,6 +64,10 @@ const PRESETS := [
     {"name": "Гиперкалиемия", "p": {}, "s": {"k": 7.0}},
     {"name": "Гипокалиемия", "p": {}, "s": {"k": 2.5}},
     {"name": "Гипокальциемия (long QT)", "p": {}, "s": {"ca": 1.7}},
+    {"name": "Желудочковые экстрасистолы (ЖЭ)", "p": {"rhythm": "sinus", "pvc_rate": 14.0}, "s": {}},
+    {"name": "ЭКС бивентрикулярный (CRT)", "p": {"rhythm": "pace_biv", "hr": 70.0, "qrs_axis": -120.0, "p_amp": 1.0}, "s": {}},
+    {"name": "ЭКС: потеря захвата", "p": {"rhythm": "pace_vvi", "hr": 70.0, "pace_fault": "loss_capture", "p_amp": 0.0}, "s": {}},
+    {"name": "ЭКС: undersensing", "p": {"rhythm": "pace_vvi", "hr": 75.0, "pace_fault": "undersense", "p_amp": 0.0}, "s": {}},
 ]
 
 var params := DEFAULTS.duplicate(true)
@@ -88,6 +97,8 @@ var lead_opt: OptionButton
 var rate_slider: HSlider
 var rate_label: Label
 var focus_opt: OptionButton
+var pace_fault_opt: OptionButton
+var pvc_opt: OptionButton
 var prob_label: Label
 var diff_label: Label
 var drug_summary: Label
@@ -198,6 +209,22 @@ func _build_monitor_tab(tabs: TabContainer) -> void:
         focus_opt.add_item(n)
     focus_opt.item_selected.connect(_on_focus)
     col.add_child(focus_opt)
+
+    _mk_label(col, "Неисправность ЭКС (для режимов стимуляции):", 14)
+    pace_fault_opt = OptionButton.new()
+    pace_fault_opt.custom_minimum_size = Vector2(0, 42)
+    for n in PACE_FAULT_NAMES:
+        pace_fault_opt.add_item(n)
+    pace_fault_opt.item_selected.connect(_on_pace_fault)
+    col.add_child(pace_fault_opt)
+
+    _mk_label(col, "Желудочковые экстрасистолы (ЖЭ):", 14)
+    pvc_opt = OptionButton.new()
+    pvc_opt.custom_minimum_size = Vector2(0, 42)
+    for n in PVC_NAMES:
+        pvc_opt.add_item(n)
+    pvc_opt.item_selected.connect(_on_pvc)
+    col.add_child(pvc_opt)
 
     rate_label = Label.new()
     rate_label.add_theme_font_size_override("font_size", 16)
@@ -573,6 +600,11 @@ func _stress_apply() -> void:
     params["st_z"] = sv.z
     state["bp_sys"] = bp.x
     state["bp_dia"] = bp.y
+    # ЖЭ на пике нагрузки (чаще при ишемии/стенозе), угасают в восстановлении.
+    var pvc := 0.0
+    if stress_stage == 5: pvc = 6.0 + 8.0 * float(stress_sten)
+    elif stress_stage == 6: pvc = 3.0 + 4.0 * float(stress_sten)
+    params["pvc_rate"] = pvc
     _suspend = false
     _recompute()
     _stress_refresh_display()
@@ -617,6 +649,15 @@ func _on_bbb(idx: int) -> void:
 
 func _on_focus(idx: int) -> void:
     params["vt_focus"] = FOCUS_VALUES[idx]
+    params["pvc_focus"] = FOCUS_VALUES[idx]
+    _recompute()
+
+func _on_pace_fault(idx: int) -> void:
+    params["pace_fault"] = PACE_FAULT_VALUES[idx]
+    _recompute()
+
+func _on_pvc(idx: int) -> void:
+    params["pvc_rate"] = PVC_RATES[idx]
     _recompute()
 
 func _on_drug_dose(level: int, i: int) -> void:
@@ -685,6 +726,10 @@ func _sync_selectors() -> void:
     bbb_opt.selected = bi if bi >= 0 else 0
     var fi := FOCUS_VALUES.find(str(params.get("vt_focus", "lv_lat_mid")))
     if focus_opt: focus_opt.selected = fi if fi >= 0 else 0
+    var pfi := PACE_FAULT_VALUES.find(str(params.get("pace_fault", "none")))
+    if pace_fault_opt: pace_fault_opt.selected = pfi if pfi >= 0 else 0
+    var pvi := PVC_RATES.find(float(params.get("pvc_rate", 0.0)))
+    if pvc_opt: pvc_opt.selected = pvi if pvi >= 0 else 0
 
 # проекция амплитуды (R/T) в отведении через 3D-геометрию
 func _amp_scale(key: String, lead: int) -> float:
@@ -927,13 +972,22 @@ func _recompute() -> void:
         primary_dx = "Полная AV-блокада (диссоциация)"
         primary_conf = 0.9
     elif rhythm == "pace_vvi":
-        primary_dx = "ЭКС: желудочковая стимуляция (VVI)"
+        var pf := str(params.get("pace_fault", "none"))
+        if pf == "loss_capture":
+            primary_dx = "ЭКС (VVI): потеря захвата — спайки без QRS"
+        elif pf == "undersense":
+            primary_dx = "ЭКС (VVI): undersensing — асинхронная стимуляция"
+        else:
+            primary_dx = "ЭКС: желудочковая стимуляция (VVI)"
         primary_conf = 0.92
     elif rhythm == "pace_aai":
         primary_dx = "ЭКС: предсердная стимуляция (AAI)"
         primary_conf = 0.92
     elif rhythm == "pace_ddd":
         primary_dx = "ЭКС: двухкамерная стимуляция (DDD)"
+        primary_conf = 0.92
+    elif rhythm == "pace_biv":
+        primary_dx = "ЭКС: бивентрикулярная стимуляция (BiV/CRT)"
         primary_conf = 0.92
     elif ed["dx"] != "":
         primary_dx = ed["dx"]
@@ -944,6 +998,7 @@ func _recompute() -> void:
 
     var findings: Array = []
     if rhythm == "sinus":
+        if float(eff.get("pvc_rate", 0.0)) > 0.0: findings.append("желудочковые экстрасистолы")
         if sok["lvh"]: findings.append("ГЛЖ (Соколов-Лайон)")
         if sok["rvh"]: findings.append("ГПЖ")
         if axis_lbl != "норма": findings.append(axis_lbl)
