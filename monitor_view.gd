@@ -16,6 +16,8 @@ var bg_c := Color(0.03, 0.06, 0.12)
 var trace_color := Color(0.45, 0.82, 1.0)
 var grid_c := Color(0.30, 0.50, 0.85)
 var hr_bpm := 0.0
+var alarm := false
+var alarm_text := ""
 var _rpeaks := {}
 var _oneshot := false
 var _steady := PackedFloat32Array()
@@ -114,6 +116,11 @@ func _draw() -> void:
         var fw := f.get_string_size(hb, HORIZONTAL_ALIGNMENT_LEFT, -1, 34).x
         draw_string(f, Vector2(w - fw - 14, 36), hb, HORIZONTAL_ALIGNMENT_LEFT, -1, 34, Color(0.45, 1.0, 0.55))
         draw_string(f, Vector2(w - 70, 52), "уд/мин", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.4, 0.7, 0.5))
+    if alarm:
+        var puls := 0.55 + 0.45 * sin(Time.get_ticks_msec() / 210.0)
+        draw_rect(Rect2(2, 2, w - 4, h - 4), Color(1.0, 0.27, 0.22, puls), false, 4.0)
+        var aw := f.get_string_size(alarm_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 16).x
+        draw_string(f, Vector2((w - aw) * 0.5, 22), alarm_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(1.0, 0.45, 0.4, 0.6 + 0.4 * puls))
 
 func _draw_seg(i0: int, i1: int, nshow: int, sweep: int, n: int, w: float, mid: float) -> void:
     if i1 <= i0:
