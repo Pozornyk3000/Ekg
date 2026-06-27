@@ -304,7 +304,7 @@ func _build_monitor_tab(tabs: TabContainer) -> void:
     col.add_child(rate_slider)
 
     monitor = MonitorView.new()
-    monitor.custom_minimum_size = Vector2(0, 150)
+    monitor.custom_minimum_size = Vector2(0, 185)
     monitor.size_flags_horizontal = Control.SIZE_EXPAND_FILL
     monitor.clip_contents = true
     col.add_child(monitor)
