@@ -17,8 +17,8 @@ const STATE_DEFAULTS := {
     "k": 4.0, "ca": 2.4, "mg": 0.85, "na": 140.0,
     "bp_sys": 120.0, "bp_dia": 80.0,
 }
-const RHYTHM_NAMES := ["Синусовый", "Фибрилляция предсердий", "Трепетание предсердий (волны F)", "Желудочковая тахикардия", "Тахикардия пируэт (Torsades)", "Двунаправленная ЖТ (дигоксин)", "AV-блокада 2 ст. Мобитц I (Венкебах)", "AV-блокада 2 ст. Мобитц II", "Полная AV-блокада", "ЭКС желудочковый (VVI)", "ЭКС предсердный (AAI)", "ЭКС двухкамерный (DDD)", "ЭКС бивентрикулярный (BiV/CRT)"]
-const RHYTHM_VALUES := ["sinus", "afib", "aflutter", "vtach", "torsades", "bidirectional", "wenckebach", "mobitz2", "av3", "pace_vvi", "pace_aai", "pace_ddd", "pace_biv"]
+const RHYTHM_NAMES := ["Синусовый", "Фибрилляция предсердий", "Трепетание предсердий (волны F)", "АВУРТ (узловая тахикардия)", "Желудочковая тахикардия", "Тахикардия пируэт (Torsades)", "Двунаправленная ЖТ (дигоксин)", "СССУ / синусовые паузы", "AV-блокада 2 ст. Мобитц I (Венкебах)", "AV-блокада 2 ст. Мобитц II", "Полная AV-блокада", "ЭКС желудочковый (VVI)", "ЭКС предсердный (AAI)", "ЭКС двухкамерный (DDD)", "ЭКС бивентрикулярный (BiV/CRT)"]
+const RHYTHM_VALUES := ["sinus", "afib", "aflutter", "avnrt", "vtach", "torsades", "bidirectional", "sss", "wenckebach", "mobitz2", "av3", "pace_vvi", "pace_aai", "pace_ddd", "pace_biv"]
 const PACE_FAULT_NAMES := ["ЭКС: норма", "Потеря захвата", "Undersensing (асинхронно)"]
 const PACE_FAULT_VALUES := ["none", "loss_capture", "undersense"]
 const PVC_NAMES := ["Нет", "Редкие", "Частые"]
@@ -67,6 +67,9 @@ const PRESETS := [
     {"name": "Синусовая тахикардия", "p": {"hr": 130.0}, "s": {}},
     {"name": "Желудочковая тахикардия", "p": {"rhythm": "vtach", "hr": 180.0}, "s": {}},
     {"name": "Двунаправленная ЖТ (дигоксин)", "p": {"rhythm": "bidirectional", "hr": 150.0, "p_amp": 0.0, "qrs_dur": 130.0}, "s": {}},
+    {"name": "АВУРТ (узловая тахикардия)", "p": {"rhythm": "avnrt", "hr": 180.0, "p_amp": 0.0}, "s": {}},
+    {"name": "СССУ / синусовые паузы", "p": {"rhythm": "sss", "hr": 60.0}, "s": {}},
+    {"name": "Трифасцикулярная блокада", "p": {"bbb": "rbbb", "hemiblock": "lafb", "qrs_axis": -35.0, "qrs_dur": 140.0, "pr": 240.0}, "s": {}},
     {"name": "Тахикардия пируэт (Torsades)", "p": {"rhythm": "torsades", "hr": 240.0, "qt": 520.0, "p_amp": 0.0}, "s": {"mg": 0.4}},
     {"name": "Кардиостимулятор (VVI)", "p": {"rhythm": "pace_vvi", "hr": 70.0, "p_amp": 0.0}, "s": {}},
     {"name": "Детское сердце", "p": {"rhythm": "sinus", "bbb": "none", "hr": 130.0, "pr": 110.0, "qt": 300.0, "qrs_axis": 100.0, "qrs_dur": 70.0, "r_amp": 10.0}, "s": {}},
@@ -119,6 +122,7 @@ var rate_label: Label
 var focus_opt: OptionButton
 var pace_fault_opt: OptionButton
 var pvc_opt: OptionButton
+var export_btn: Button
 var prob_label: Label
 var diff_label: Label
 var drug_summary: Label
@@ -250,6 +254,12 @@ func _build_monitor_tab(tabs: TabContainer) -> void:
     _add_artifact_check(col, "Дыхательная аритмия (вариабельность RR)", "resp_arr", 0.06, true)
     _add_artifact_check(col, "Дрейф изолинии", "baseline_wander", 0.8, false)
     _add_artifact_check(col, "Сетевая наводка 50 Гц", "mains_noise", 0.15, false)
+
+    export_btn = Button.new()
+    export_btn.text = "💾 Экспорт 12 отведений в PNG"
+    export_btn.custom_minimum_size = Vector2(0, 42)
+    export_btn.pressed.connect(_export_png)
+    col.add_child(export_btn)
 
     rate_label = Label.new()
     rate_label.add_theme_font_size_override("font_size", 16)
@@ -813,7 +823,7 @@ func _refresh_edit() -> void:
     edit_view.st_level = ECGModel.st_level_lead(params, selected_lead)
     edit_view.rr_ms = 60000.0 / maxf(float(_last_eff.get("hr", 75.0)), 20.0)
     var rh := str(_last_eff.get("rhythm", "sinus"))
-    var hp := (rh == "sinus" or rh == "av3" or rh == "wenckebach" or rh == "mobitz2" or rh == "pace_aai" or rh == "pace_ddd")
+    var hp := (rh == "sinus" or rh == "av3" or rh == "sss" or rh == "wenckebach" or rh == "mobitz2" or rh == "pace_aai" or rh == "pace_ddd")
     edit_view.has_p = hp and float(params.get("p_amp", 0.0)) > 0.2
     edit_view.queue_redraw()
 
@@ -854,6 +864,29 @@ func _on_edit_release() -> void:
     if not _built:
         return
     _recompute()
+
+func _export_png() -> void:
+    # Рендер 12-канального листа во внеэкранный SubViewport и сохранение в PNG.
+    if buffers.size() < 12:
+        return
+    var vp := SubViewport.new()
+    vp.size = Vector2i(1600, 1000)
+    vp.render_target_update_mode = SubViewport.UPDATE_ONCE
+    var sheet := ECGSheet.new()
+    sheet.size = Vector2(1600, 1000)
+    sheet.buffers = buffers
+    sheet.lead_names = LEADS
+    sheet.title = dx_label.text if dx_label else "ЭКГ 12 отведений"
+    vp.add_child(sheet)
+    add_child(vp)
+    sheet.queue_redraw()
+    await RenderingServer.frame_post_draw
+    var img := vp.get_texture().get_image()
+    var path := "user://ecg_export.png"
+    var err := img.save_png(path)
+    vp.queue_free()
+    if export_btn:
+        export_btn.text = ("✓ PNG: " + ProjectSettings.globalize_path(path)) if err == OK else "Ошибка сохранения PNG"
 
 func _on_thumb_input(event: InputEvent, i: int) -> void:
     if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
@@ -1011,6 +1044,12 @@ func _recompute() -> void:
     elif rhythm == "bidirectional":
         primary_dx = "Двунаправленная ЖТ (дигоксиновая интоксикация)"
         primary_conf = 0.93
+    elif rhythm == "avnrt":
+        primary_dx = "АВУРТ (узловая тахикардия)"
+        primary_conf = 0.9
+    elif rhythm == "sss":
+        primary_dx = "СССУ (синусовые паузы)"
+        primary_conf = 0.88
     elif rhythm == "wenckebach":
         primary_dx = "AV-блокада 2 ст. Мобитц I (Венкебах)"
         primary_conf = 0.9

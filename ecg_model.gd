@@ -154,6 +154,31 @@ static func _gen_events(p: Dictionary, window: float = WINDOW_MS) -> Dictionary:
             vent.append({"t": tv, "kind": "vt"})
             tv += esc
         return {"atrial": atrial, "vent": vent, "afib": false}
+    elif rhythm == "sss":
+        # СССУ / синусовые паузы: периодически СА-узел не срабатывает (нет P) — длинная
+        # пауза, которую перебивает узловой выскальзывающий комплекс (узкий QRS без P).
+        var tss := 0.0
+        var bss := 0
+        while tss < window:
+            if bss % 4 == 3:
+                var esc_t := tss + rr * 1.3
+                if esc_t < window:
+                    vent.append({"t": esc_t, "kind": nkind})  # узловой escape, без P
+                tss += rr * 2.0  # длинная пауза
+            else:
+                atrial.append(tss)
+                vent.append({"t": tss + float(p["pr"]), "kind": nkind})
+                tss += rr
+            bss += 1
+        return {"atrial": atrial, "vent": vent, "afib": false}
+    elif rhythm == "avnrt":
+        # АВУРТ: регулярная узкокомплексная тахикардия без видимого P (ретроградный P
+        # скрыт в QRS — псевдо-r' в V1, псевдо-S в нижних). retro_p добавляет его в рендере.
+        var tav := 0.0
+        while tav < window:
+            vent.append({"t": tav, "kind": nkind})
+            tav += rr
+        return {"atrial": [], "vent": vent, "afib": false, "retro_p": true}
     elif rhythm == "wenckebach":
         # AV-блокада 2 ст., Мобитц I: PR прогрессивно удлиняется, пока QRS не выпадает
         # (P без QRS), затем цикл повторяется. 4:3 (выпадает каждый 4-й).
@@ -688,6 +713,9 @@ static func _render_one(p: Dictionary, lead: int, ev: Dictionary, bs: Dictionary
     var flutter: bool = ev.get("flutter", false)
     var fcycle: float = ev.get("fcycle", 200.0)
     var fl_proj := lv.dot(_FLUTTER_VEC.normalized()) * _FLUTTER_AMP
+    var retro_p: bool = ev.get("retro_p", false)
+    # Ретроградный P (АВУРТ): вектор кверху → отриц. в нижних (псевдо-S), полож. в V1.
+    var retro_proj := lv.dot(Vector3(0.0, -0.8, -0.3).normalized()) * 1.7
     var atrial: Array = ev["atrial"]
     var vent: Array = ev["vent"]
     var idx: Array = bs["idx"]
@@ -725,6 +753,8 @@ static func _render_one(p: Dictionary, lead: int, ev: Dictionary, bs: Dictionary
             var sp: Dictionary = setproj[idx[ei]]
             for cc in sp["comps"]:
                 v += cc["a"] * _g(tau2, cc["c"], cc["s"])
+            if retro_p:
+                v += retro_proj * _g(tau2, sp["j"] - 8.0, 9.0)  # ретроградный P у конца QRS
             var pl := _plateau(tau2, sp["j"], sp["t_on"])
             if pl > 0.0:
                 v += pst * pl
@@ -935,6 +965,8 @@ static func pathology_probabilities(p: Dictionary, s: Dictionary) -> Array:
     elif rhythm == "vtach": out.append({"name": "Желудочковая тахикардия", "prob": 0.97})
     elif rhythm == "torsades": out.append({"name": "Пируэтная тахикардия (Torsades)", "prob": 0.97})
     elif rhythm == "bidirectional": out.append({"name": "Двунаправленная ЖТ (дигоксин)", "prob": 0.96})
+    elif rhythm == "avnrt": out.append({"name": "АВУРТ (узловая тахикардия)", "prob": 0.94})
+    elif rhythm == "sss": out.append({"name": "СССУ (синусовые паузы)", "prob": 0.9})
     elif rhythm == "wenckebach": out.append({"name": "AV-блокада 2 ст. Мобитц I (Венкебах)", "prob": 0.93})
     elif rhythm == "mobitz2": out.append({"name": "AV-блокада 2 ст. Мобитц II", "prob": 0.93})
     elif rhythm == "av3": out.append({"name": "Полная AV-блокада", "prob": 0.95})
@@ -959,7 +991,10 @@ static func pathology_probabilities(p: Dictionary, s: Dictionary) -> Array:
         out.append({"name": "Гипертрофия с перегрузкой (strain)", "prob": 0.82})
     var hemi := str(p.get("hemiblock", "none"))
     var is_rbbb := str(p.get("bbb", "none")) == "rbbb"
-    if hemi == "lafb":
+    var tri := is_rbbb and hemi != "none" and pr > THR.pr_long
+    if tri:
+        out.append({"name": "Трифасцикулярная блокада (би- + AV-блокада 1 ст.)", "prob": 0.88})
+    elif hemi == "lafb":
         if is_rbbb: out.append({"name": "Бифасцикулярная блокада (ПНПГ + ЛПВ)", "prob": 0.9})
         else: out.append({"name": "Блокада передней ветви ЛНПГ (ЛПВ)", "prob": 0.85})
     elif hemi == "lpfb":
@@ -1019,6 +1054,10 @@ static func ecg_report(p: Dictionary, sok: Dictionary, axis_lbl: String, res: Di
     elif rhythm == "aflutter":
         var ratio := clampi(roundi(300.0 / maxf(float(p["hr"]), 50.0)), 1, 6)
         line1 = "Ритм: трепетание предсердий, пилообразные волны F ~300/мин, проведение %d:1, ЧСС жел. ~%d." % [ratio, hr]
+    elif rhythm == "avnrt":
+        line1 = "Ритм: АВ-узловая реципрокная тахикардия (АВУРТ), ЧСС %d — узкие комплексы, P не виден (ретроградный, скрыт в QRS)." % hr
+    elif rhythm == "sss":
+        line1 = "Ритм: синдром слабости синусового узла — синусовые паузы с узловыми выскальзывающими комплексами (ЧСС синуса %d)." % hr
     elif rhythm == "vtach":
         line1 = "Ритм: желудочковая тахикардия, ЧСС %d, широкие комплексы без P." % hr
     elif rhythm == "torsades":
@@ -1140,6 +1179,12 @@ static func wellbeing(p: Dictionary, s: Dictionary) -> Dictionary:
     elif rhythm == "bidirectional":
         issues.append("двунаправленная ЖТ — тяжёлая дигоксиновая интоксикация")
         sev = maxi(sev, 3)
+    elif rhythm == "avnrt":
+        issues.append("узловая тахикардия (АВУРТ) — сердцебиение, возможна гипотония")
+        sev = maxi(sev, 2)
+    elif rhythm == "sss":
+        issues.append("синусовые паузы (СССУ) — головокружение, обмороки")
+        sev = maxi(sev, 2)
     elif rhythm == "av3":
         issues.append("полная AV-блокада — редкий пульс, обмороки")
         sev = maxi(sev, 2)
@@ -1160,7 +1205,7 @@ static func wellbeing(p: Dictionary, s: Dictionary) -> Dictionary:
         issues.append("тяжёлая гипокалиемия — аритмии")
         sev = maxi(sev, 2)
 
-    if rhythm != "vtach" and rhythm != "av3" and rhythm != "torsades" and rhythm != "bidirectional" and not rhythm.begins_with("pace"):
+    if rhythm != "vtach" and rhythm != "av3" and rhythm != "torsades" and rhythm != "bidirectional" and rhythm != "avnrt" and not rhythm.begins_with("pace"):
         if hr >= 180.0:
             issues.append("крайняя тахикардия")
             sev = maxi(sev, 3)
