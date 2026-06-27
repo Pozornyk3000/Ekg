@@ -161,6 +161,12 @@ var quiz_diff_opt: OptionButton
 var quiz_cat_opt: OptionButton
 var quiz_diff_idx := 0
 var quiz_cat_idx := 0
+var exam_btn: Button
+var exam_active := false
+var exam_q := 0
+var exam_score := 0
+var exam_misses: Array = []
+const EXAM_TOTAL := 10
 
 func _ready() -> void:
     set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -619,16 +625,56 @@ func _build_quiz_tab(tabs: TabContainer) -> void:
     quiz_next_btn = Button.new()
     quiz_next_btn.text = "▶ Новый вопрос"
     quiz_next_btn.custom_minimum_size = Vector2(0, 46)
-    quiz_next_btn.pressed.connect(_quiz_new)
+    quiz_next_btn.pressed.connect(_quiz_next)
     col.add_child(quiz_next_btn)
+
+    exam_btn = Button.new()
+    exam_btn.text = "🎓 Экзамен (10 вопросов)"
+    exam_btn.custom_minimum_size = Vector2(0, 46)
+    exam_btn.pressed.connect(_exam_start)
+    col.add_child(exam_btn)
 
 func _on_quiz_diff(i: int) -> void:
     quiz_diff_idx = i
+    exam_active = false
     _quiz_new()
 
 func _on_quiz_cat(i: int) -> void:
     quiz_cat_idx = i
+    exam_active = false
     _quiz_new()
+
+func _exam_start() -> void:
+    exam_active = true
+    exam_q = 0
+    exam_score = 0
+    exam_misses = []
+    _quiz_new()
+
+func _quiz_next() -> void:
+    if exam_active and exam_q >= EXAM_TOTAL and quiz_answered:
+        _exam_finish()
+    else:
+        _quiz_new()
+
+func _exam_finish() -> void:
+    exam_active = false
+    var pct := roundi(float(exam_score) / float(EXAM_TOTAL) * 100.0)
+    var verdict := "нужна практика"
+    if pct >= 90: verdict = "отлично"
+    elif pct >= 70: verdict = "хорошо"
+    elif pct >= 50: verdict = "удовлетворительно"
+    quiz_feedback.text = "📊 Экзамен завершён: %d / %d (%d%%) — %s" % [exam_score, EXAM_TOTAL, pct, verdict]
+    quiz_feedback.add_theme_color_override("font_color",
+        Color(0.3, 1.0, 0.45) if pct >= 70 else (Color(0.95, 0.85, 0.2) if pct >= 50 else Color(1.0, 0.4, 0.3)))
+    if exam_misses.is_empty():
+        quiz_explain.text = "Без ошибок — отличная работа!"
+    else:
+        quiz_explain.text = "Ошибки (повтори): " + ", ".join(PackedStringArray(exam_misses))
+    quiz_score_label.text = "Счёт за сессию: %d / %d" % [quiz_correct, quiz_total]
+    for b in quiz_answer_btns:
+        b.disabled = true
+    quiz_next_btn.text = "▶ Новый вопрос"
 
 func _quiz_category(pr: Dictionary) -> String:
     var p: Dictionary = pr["p"]
@@ -733,9 +779,17 @@ func _quiz_new() -> void:
         lv.queue_redraw()
     quiz_explain_text = _quiz_report(eff, gen)
     quiz_feedback.text = ""
+    quiz_feedback.remove_theme_color_override("font_color")
     quiz_explain.text = ""
-    quiz_next_btn.text = "▶ Следующий вопрос"
-    quiz_score_label.text = "Счёт: %d / %d" % [quiz_correct, quiz_total]
+    if exam_active:
+        exam_q += 1
+        quiz_score_label.text = "🎓 Экзамен — вопрос %d/%d   (верно: %d)" % [exam_q, EXAM_TOTAL, exam_score]
+        quiz_next_btn.text = "Ответьте на вопрос…"
+        quiz_next_btn.disabled = true
+    else:
+        quiz_next_btn.text = "▶ Следующий вопрос"
+        quiz_next_btn.disabled = false
+        quiz_score_label.text = "Счёт: %d / %d" % [quiz_correct, quiz_total]
 
 func _quiz_answer(i: int) -> void:
     if quiz_answered or quiz_answer_idx < 0:
@@ -754,7 +808,14 @@ func _quiz_answer(i: int) -> void:
     quiz_feedback.text = "✓ Верно!" if ok else "✗ Неверно. Правильно: " + str(quiz_answer_btns[quiz_answer_idx].text)
     quiz_feedback.add_theme_color_override("font_color", Color(0.3, 1.0, 0.45) if ok else Color(1.0, 0.4, 0.3))
     quiz_explain.text = quiz_explain_text
-    quiz_score_label.text = "Счёт: %d / %d" % [quiz_correct, quiz_total]
+    if exam_active:
+        if ok: exam_score += 1
+        else: exam_misses.append(str(quiz_answer_btns[quiz_answer_idx].text))
+        quiz_next_btn.disabled = false
+        quiz_next_btn.text = "📊 Показать результат" if exam_q >= EXAM_TOTAL else "▶ Далее (%d/%d)" % [exam_q, EXAM_TOTAL]
+        quiz_score_label.text = "🎓 Экзамен — вопрос %d/%d   (верно: %d)" % [exam_q, EXAM_TOTAL, exam_score]
+    else:
+        quiz_score_label.text = "Счёт: %d / %d" % [quiz_correct, quiz_total]
 
 func _build_stress_tab(tabs: TabContainer) -> void:
     var sc := ScrollContainer.new()
