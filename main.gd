@@ -8,7 +8,7 @@ const DEFAULTS := {
     "st_x": 0.0, "st_y": 0.0, "st_z": 0.0, "qt": 380.0, "t_amp": 4.0,
     "qrs_axis": 60.0, "t_axis": 45.0, "rhythm": "sinus", "bbb": "none", "vt_focus": "lv_lat_mid",
     "pace_fault": "none", "pvc_rate": 0.0, "pvc_focus": "lv_lat_mid",
-    "resp_arr": 0.06, "baseline_wander": 0.0, "mains_noise": 0.0,
+    "resp_arr": 0.06, "baseline_wander": 0.0, "mains_noise": 0.0, "cpr": 0.0,
     "st_shape": 0.0, "p_morph": "normal",
     "delta_amp": 0.0, "j_wave": 0.0, "t_post": 0.0, "pr_dep": 0.0, "strain": 0.0, "rv_boost": 0.0,
     "hemiblock": "none",
@@ -527,6 +527,7 @@ func _build_monitor_tab(tabs: TabContainer) -> void:
     defib_btn.custom_minimum_size = Vector2(0, 42)
     defib_btn.pressed.connect(_defib)
     col.add_child(defib_btn)
+    _add_artifact_check(col, "СЛР — компрессии грудной клетки (~110/мин)", "cpr", 7.0, false)
 
     edit_btn = Button.new()
     edit_btn.text = "✏ Редактировать кривую (сетка ЭКГ)"

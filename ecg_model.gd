@@ -843,15 +843,22 @@ static func generate_defib(pb: Dictionary, pa: Dictionary, lead: int, total_ms: 
 static func _add_artifacts(buf: PackedFloat32Array, p: Dictionary, lead: int, total_ms: float, n: int) -> void:
     var wander := float(p.get("baseline_wander", 0.0))  # дрейф изолинии, мм
     var mains := float(p.get("mains_noise", 0.0))        # сетевая наводка 50 Гц, мм
-    if wander <= 0.0 and mains <= 0.0:
+    var cpr := float(p.get("cpr", 0.0))                  # СЛР: компрессии грудной клетки, мм
+    if wander <= 0.0 and mains <= 0.0 and cpr <= 0.0:
         return
     var phase := float(lead) * 0.7
+    var fc := 110.0 / 60.0  # частота компрессий, Гц (~110/мин)
     for i in n:
         var t := i / float(n) * total_ms / 1000.0
         if wander > 0.0:
             buf[i] += wander * (sin(TAU * 0.22 * t + phase) + 0.4 * sin(TAU * 0.11 * t + phase * 1.7))
         if mains > 0.0:
             buf[i] += mains * sin(TAU * 50.0 * t + phase)
+        if cpr > 0.0:
+            # Крупный регулярный артефакт компрессии: толчок вниз + отдача вверх.
+            var ph := fposmod(t * fc, 1.0)
+            var comp := -exp(-((ph - 0.18) * (ph - 0.18)) / 0.010) + 0.45 * exp(-((ph - 0.45) * (ph - 0.45)) / 0.022)
+            buf[i] += cpr * comp
 
 # Один лид в стандартном окне — для интерактивной правки (лёгкий пересчёт при перетаскивании).
 static func generate_lead(p: Dictionary, lead: int) -> PackedFloat32Array:
