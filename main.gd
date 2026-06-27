@@ -17,8 +17,8 @@ const STATE_DEFAULTS := {
     "k": 4.0, "ca": 2.4, "mg": 0.85, "na": 140.0,
     "bp_sys": 120.0, "bp_dia": 80.0,
 }
-const RHYTHM_NAMES := ["Синусовый", "Фибрилляция предсердий", "Трепетание предсердий (волны F)", "Желудочковая тахикардия", "Тахикардия пируэт (Torsades)", "AV-блокада 2 ст. Мобитц I (Венкебах)", "AV-блокада 2 ст. Мобитц II", "Полная AV-блокада", "ЭКС желудочковый (VVI)", "ЭКС предсердный (AAI)", "ЭКС двухкамерный (DDD)", "ЭКС бивентрикулярный (BiV/CRT)"]
-const RHYTHM_VALUES := ["sinus", "afib", "aflutter", "vtach", "torsades", "wenckebach", "mobitz2", "av3", "pace_vvi", "pace_aai", "pace_ddd", "pace_biv"]
+const RHYTHM_NAMES := ["Синусовый", "Фибрилляция предсердий", "Трепетание предсердий (волны F)", "Желудочковая тахикардия", "Тахикардия пируэт (Torsades)", "Двунаправленная ЖТ (дигоксин)", "AV-блокада 2 ст. Мобитц I (Венкебах)", "AV-блокада 2 ст. Мобитц II", "Полная AV-блокада", "ЭКС желудочковый (VVI)", "ЭКС предсердный (AAI)", "ЭКС двухкамерный (DDD)", "ЭКС бивентрикулярный (BiV/CRT)"]
+const RHYTHM_VALUES := ["sinus", "afib", "aflutter", "vtach", "torsades", "bidirectional", "wenckebach", "mobitz2", "av3", "pace_vvi", "pace_aai", "pace_ddd", "pace_biv"]
 const PACE_FAULT_NAMES := ["ЭКС: норма", "Потеря захвата", "Undersensing (асинхронно)"]
 const PACE_FAULT_VALUES := ["none", "loss_capture", "undersense"]
 const PVC_NAMES := ["Нет", "Редкие", "Частые"]
@@ -30,7 +30,7 @@ const FOCUS_VALUES := ["lv_lat_mid", "lv_lat_ap", "sep_mid", "rv_mid", "rv_out"]
 
 # Препараты: d/sd — терапевтическая доза; td/tsd — ДОБАВКА при токсической; trhythm — аритмия при токсичности.
 const DRUGS := [
-    {"name": "Дигоксин", "d": {"qt": -35.0, "pr": 25.0, "hr": -10.0, "t_amp": -1.5, "st_x": -0.5, "st_y": -0.3, "st_shape": -1.0}, "sd": {}, "td": {"pr": 45.0, "hr": -18.0}, "tsd": {}, "trhythm": "av3", "desc": "тер: ↓QT, ↑PR, корытообразная ST. токс: AV-блокада, аритмии"},
+    {"name": "Дигоксин", "d": {"qt": -35.0, "pr": 25.0, "hr": -10.0, "t_amp": -1.5, "st_x": -0.5, "st_y": -0.3, "st_shape": -1.0}, "sd": {}, "td": {"pr": 45.0, "hr": -18.0}, "tsd": {}, "trhythm": "bidirectional", "desc": "тер: ↓QT, ↑PR, корытообразная ST. токс: двунаправленная ЖТ, AV-блокада"},
     {"name": "Амиодарон (III)", "d": {"qt": 60.0, "hr": -15.0, "qrs_dur": 8.0}, "sd": {}, "td": {"qt": 75.0, "hr": -12.0}, "tsd": {}, "trhythm": "", "desc": "тер: ↑↑QT, брадикардия. токс: ↑↑↑QT — риск Torsades"},
     {"name": "Соталол (III)", "d": {"qt": 55.0, "hr": -18.0}, "sd": {}, "td": {"qt": 80.0}, "tsd": {}, "trhythm": "", "desc": "тер: ↑↑QT, ↓ЧСС. токс: ↑↑↑QT — Torsades"},
     {"name": "Флекаинид (IC)", "d": {"qrs_dur": 35.0, "pr": 20.0, "qt": 15.0}, "sd": {}, "td": {"qrs_dur": 60.0}, "tsd": {}, "trhythm": "vtach", "desc": "тер: ↑↑QRS, ↑PR. токс: очень широкий QRS, ЖТ"},
@@ -66,6 +66,7 @@ const PRESETS := [
     {"name": "Брадикардия", "p": {"hr": 45.0}, "s": {}},
     {"name": "Синусовая тахикардия", "p": {"hr": 130.0}, "s": {}},
     {"name": "Желудочковая тахикардия", "p": {"rhythm": "vtach", "hr": 180.0}, "s": {}},
+    {"name": "Двунаправленная ЖТ (дигоксин)", "p": {"rhythm": "bidirectional", "hr": 150.0, "p_amp": 0.0, "qrs_dur": 130.0}, "s": {}},
     {"name": "Тахикардия пируэт (Torsades)", "p": {"rhythm": "torsades", "hr": 240.0, "qt": 520.0, "p_amp": 0.0}, "s": {"mg": 0.4}},
     {"name": "Кардиостимулятор (VVI)", "p": {"rhythm": "pace_vvi", "hr": 70.0, "p_amp": 0.0}, "s": {}},
     {"name": "Детское сердце", "p": {"rhythm": "sinus", "bbb": "none", "hr": 130.0, "pr": 110.0, "qt": 300.0, "qrs_axis": 100.0, "qrs_dur": 70.0, "r_amp": 10.0}, "s": {}},
@@ -1007,6 +1008,9 @@ func _recompute() -> void:
     elif rhythm == "torsades":
         primary_dx = "Тахикардия пируэт (Torsades)"
         primary_conf = 0.95
+    elif rhythm == "bidirectional":
+        primary_dx = "Двунаправленная ЖТ (дигоксиновая интоксикация)"
+        primary_conf = 0.93
     elif rhythm == "wenckebach":
         primary_dx = "AV-блокада 2 ст. Мобитц I (Венкебах)"
         primary_conf = 0.9

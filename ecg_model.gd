@@ -128,6 +128,14 @@ static func _gen_events(p: Dictionary, window: float = WINDOW_MS) -> Dictionary:
             vent.append({"t": tvt, "kind": "vt"})
             tvt += rr
         return {"atrial": [], "vent": vent, "afib": false}
+    elif rhythm == "bidirectional":
+        # Двунаправленная ЖТ (дигоксиновая интоксикация): широкие комплексы, ось QRS
+        # чередуется от удара к удару (~180°). Набор морфологий — в _build_beatsets.
+        var tbd := 0.0
+        while tbd < window:
+            vent.append({"t": tbd, "kind": "vt"})
+            tbd += rr
+        return {"atrial": [], "vent": vent, "afib": false, "bidir": true}
     elif rhythm == "torsades":
         var rrt := 60000.0 / maxf(hr, 200.0)
         var tto := 0.0
@@ -627,6 +635,16 @@ static func _build_beatsets(p: Dictionary, ev: Dictionary) -> Dictionary:
             sets.append(bc)
             idx.append(bi)
             qeff_out = maxf(qeff_out, float(bc["qeff"]))
+    elif rhythm == "bidirectional":
+        # Двунаправленная ЖТ: две морфологии с осью, чередующейся ~на 180° (−60°/+120°).
+        for axdeg in [-60.0, 120.0]:
+            var pb := p.duplicate(true)
+            pb["qrs_axis"] = axdeg
+            var bcb := _beat_components(pb, "vt")
+            sets.append(bcb)
+            qeff_out = maxf(qeff_out, float(bcb["qeff"]))
+        for bi in range(vent.size()):
+            idx.append(bi % 2)
     else:
         var kindmap := {}
         for vv in vent:
@@ -916,6 +934,7 @@ static func pathology_probabilities(p: Dictionary, s: Dictionary) -> Array:
     elif rhythm == "aflutter": out.append({"name": "Трепетание предсердий (волны F)", "prob": 0.95})
     elif rhythm == "vtach": out.append({"name": "Желудочковая тахикардия", "prob": 0.97})
     elif rhythm == "torsades": out.append({"name": "Пируэтная тахикардия (Torsades)", "prob": 0.97})
+    elif rhythm == "bidirectional": out.append({"name": "Двунаправленная ЖТ (дигоксин)", "prob": 0.96})
     elif rhythm == "wenckebach": out.append({"name": "AV-блокада 2 ст. Мобитц I (Венкебах)", "prob": 0.93})
     elif rhythm == "mobitz2": out.append({"name": "AV-блокада 2 ст. Мобитц II", "prob": 0.93})
     elif rhythm == "av3": out.append({"name": "Полная AV-блокада", "prob": 0.95})
@@ -1004,6 +1023,8 @@ static func ecg_report(p: Dictionary, sok: Dictionary, axis_lbl: String, res: Di
         line1 = "Ритм: желудочковая тахикардия, ЧСС %d, широкие комплексы без P." % hr
     elif rhythm == "torsades":
         line1 = "Ритм: пируэтная тахикардия (Torsades) — полиморфная ЖТ с вращением оси на фоне длинного QT."
+    elif rhythm == "bidirectional":
+        line1 = "Ритм: двунаправленная ЖТ, ЧСС %d — ось QRS чередуется от удара к удару (патогномонично для дигоксиновой интоксикации)." % hr
     elif rhythm == "wenckebach":
         line1 = "Ритм: AV-блокада 2 ст. Мобитц I (Венкебах) — PR прогрессивно удлиняется до выпадения QRS (предсердия %d)." % hr
     elif rhythm == "mobitz2":
@@ -1116,6 +1137,9 @@ static func wellbeing(p: Dictionary, s: Dictionary) -> Dictionary:
     elif rhythm == "torsades":
         issues.append("пируэтная тахикардия — угроза фибрилляции желудочков")
         sev = maxi(sev, 3)
+    elif rhythm == "bidirectional":
+        issues.append("двунаправленная ЖТ — тяжёлая дигоксиновая интоксикация")
+        sev = maxi(sev, 3)
     elif rhythm == "av3":
         issues.append("полная AV-блокада — редкий пульс, обмороки")
         sev = maxi(sev, 2)
@@ -1136,7 +1160,7 @@ static func wellbeing(p: Dictionary, s: Dictionary) -> Dictionary:
         issues.append("тяжёлая гипокалиемия — аритмии")
         sev = maxi(sev, 2)
 
-    if rhythm != "vtach" and rhythm != "av3" and rhythm != "torsades" and not rhythm.begins_with("pace"):
+    if rhythm != "vtach" and rhythm != "av3" and rhythm != "torsades" and rhythm != "bidirectional" and not rhythm.begins_with("pace"):
         if hr >= 180.0:
             issues.append("крайняя тахикардия")
             sev = maxi(sev, 3)
