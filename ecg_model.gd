@@ -798,6 +798,17 @@ static func generate_monitor(p: Dictionary, lead: int, total_ms: float, n: int) 
     return buf
 
 # Артефакты живого монитора (на сетку 12 отведений/анализ НЕ наносятся — она чистая).
+# Переходная лента: первые switch_ms — ритм pb (аритмия), далее — pa (после препарата).
+static func generate_transition(pb: Dictionary, pa: Dictionary, lead: int, total_ms: float, n: int, switch_ms: float) -> PackedFloat32Array:
+    var b := generate_monitor(pb, lead, total_ms, n)
+    var a := generate_monitor(pa, lead, total_ms, n)
+    var sw := clampi(int(switch_ms / total_ms * n), 1, n - 1)
+    var out := PackedFloat32Array()
+    out.resize(n)
+    for i in n:
+        out[i] = b[i] if i < sw else a[i]
+    return out
+
 static func _add_artifacts(buf: PackedFloat32Array, p: Dictionary, lead: int, total_ms: float, n: int) -> void:
     var wander := float(p.get("baseline_wander", 0.0))  # дрейф изолинии, мм
     var mains := float(p.get("mains_noise", 0.0))        # сетевая наводка 50 Гц, мм

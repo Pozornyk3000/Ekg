@@ -17,9 +17,22 @@ var trace_color := Color(0.45, 0.82, 1.0)
 var grid_c := Color(0.30, 0.50, 0.85)
 var hr_bpm := 0.0
 var _rpeaks := {}
+var _oneshot := false
+var _steady := PackedFloat32Array()
 
 func update_samples(buf: PackedFloat32Array) -> void:
     samples = buf
+    _oneshot = false
+    _steady = PackedFloat32Array()
+    _detect_peaks()
+    queue_redraw()
+
+# Проиграть переходную ленту один раз (купирование аритмии), затем перейти на steady.
+func play_transition(trans: PackedFloat32Array, steady: PackedFloat32Array) -> void:
+    samples = trans
+    _steady = steady
+    _oneshot = true
+    head = 0.0
     _detect_peaks()
     queue_redraw()
 
@@ -42,6 +55,12 @@ func _detect_peaks() -> void:
 func _process(delta: float) -> void:
     if samples.size() > 1:
         head += SAMPLES_PER_S * delta
+        if _oneshot and head >= float(samples.size()):
+            samples = _steady
+            _steady = PackedFloat32Array()
+            _oneshot = false
+            head = fposmod(head, float(maxi(samples.size(), 1)))
+            _detect_peaks()
         queue_redraw()
 
 func _draw() -> void:

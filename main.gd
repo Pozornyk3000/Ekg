@@ -43,7 +43,21 @@ const DRUGS := [
     {"name": "Амитриптилин (ТЦА)", "d": {"qrs_dur": 25.0, "qt": 40.0, "hr": 18.0}, "sd": {}, "td": {"qrs_dur": 55.0, "qt": 55.0}, "tsd": {}, "trhythm": "vtach", "desc": "тер: ↑QRS, ↑QT. токс: ↑↑↑QRS, ЖТ"},
     {"name": "Спиронолактон", "d": {}, "sd": {"k": 1.0}, "td": {}, "tsd": {"k": 2.5}, "trhythm": "", "desc": "тер: ↑K. токс: гиперкалиемия — высокие T"},
     {"name": "Фуросемид", "d": {}, "sd": {"k": -1.0, "mg": -0.2}, "td": {}, "tsd": {"k": -1.8, "mg": -0.4}, "trhythm": "", "desc": "тер: ↓K/Mg. токс: гипокалиемия — U, ↑QT"},
+    {"name": "Аденозин", "d": {}, "sd": {}, "td": {}, "tsd": {}, "trhythm": "", "desc": "купирует АВУРТ (кратковременная AV-блокада); демаскирует трепетание"},
+    {"name": "Магния сульфат", "d": {}, "sd": {"mg": 0.6}, "td": {}, "tsd": {}, "trhythm": "", "desc": "купирует Torsades; ↑Mg"},
 ]
+# Конверсия ритма в синус терапевтической дозой (купирование аритмии).
+const DRUG_CONV := {
+    "Амиодарон (III)": ["vtach", "afib", "aflutter", "avnrt"],
+    "Соталол (III)": ["afib", "aflutter", "vtach"],
+    "Флекаинид (IC)": ["afib", "aflutter"],
+    "Хинидин (IA)": ["afib"],
+    "Лидокаин (IB)": ["vtach"],
+    "Бета-блокатор": ["avnrt"],
+    "Верапамил/Дилтиазем": ["avnrt"],
+    "Аденозин": ["avnrt"],
+    "Магния сульфат": ["torsades"],
+}
 const DOSE_NAMES := ["Выкл", "Терапевт.", "Токсич."]
 const QUIZ_DIFF_NAMES := ["Все уровни", "Новичок", "Эксперт"]
 const QUIZ_CAT_NAMES := ["Все системы", "Аритмии / ЭКС", "Инфаркт / ишемия", "Блокады проводимости", "Гипертрофия / прочее"]
@@ -134,6 +148,8 @@ var bg_rect: ColorRect
 var theme_btn: Button
 var theme_name := "blue"
 var section_bars: Array = []
+var event_label: Label
+var _conv_shown_for := ""
 
 const PALETTES := {
     "blue": {"name": "Синяя", "bg": "#070e1c", "panel": "#0e1830", "panel2": "#152444", "hover": "#1e3461", "accent": "#4d9fff", "accent_d": "#2a4f8f", "border": "#21345e", "text": "#dce6f7", "dim": "#8497bd", "darktxt": "#06112a", "trace": "#73d2ff", "mon_bg": "#03060f", "grid": "#2a4f8f"},
@@ -232,6 +248,12 @@ func _ready() -> void:
     wb_label.add_theme_font_size_override("font_size", 15)
     wb_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
     vb.add_child(wb_label)
+
+    event_label = Label.new()
+    event_label.add_theme_font_size_override("font_size", 15)
+    event_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+    event_label.add_theme_color_override("font_color", Color(0.35, 1.0, 0.6))
+    vb.add_child(event_label)
 
     report_label = Label.new()
     report_label.add_theme_font_size_override("font_size", 13)
@@ -1247,6 +1269,17 @@ func _eff_state() -> Dictionary:
     s["mg"] = clampf(float(s["mg"]), 0.2, 2.2)
     return s
 
+# Активный препарат (терап. доза), купирующий данную аритмию → его название, иначе "".
+func _active_converter(base: String) -> String:
+    if base == "sinus" or base == "":
+        return ""
+    for i in DRUGS.size():
+        if active_drugs[i] < 1: continue
+        var nm := str(DRUGS[i]["name"])
+        if DRUG_CONV.has(nm) and base in DRUG_CONV[nm]:
+            return nm
+    return ""
+
 # аритмия от токсичности (vtach приоритетнее av3)
 func _drug_rhythm() -> String:
     var found := ""
@@ -1417,8 +1450,26 @@ func _refresh_monitor() -> void:
         lvj.queue_redraw()
     if _last_eff.is_empty(): return
     monitor.hr_bpm = float(_last_eff.get("hr", 0.0))
-    monitor.update_samples(ECGModel.generate_monitor(_last_eff, selected_lead, 20000.0, 4000))
     monitor.lead_name = LEADS[selected_lead]
+    var base := str(params.get("rhythm", "sinus"))
+    var conv_drug := _active_converter(base)
+    var steady := ECGModel.generate_monitor(_last_eff, selected_lead, 20000.0, 4000)
+    if conv_drug != "" and base != _conv_shown_for and not edit_mode:
+        # Анимация купирования: аритмия → (через ~5 с) синус, один проход.
+        var eff_before: Dictionary = _last_eff.duplicate(true)
+        eff_before["rhythm"] = base
+        var trans := ECGModel.generate_transition(eff_before, _last_eff, selected_lead, 20000.0, 4000, 5000.0)
+        monitor.play_transition(trans, steady)
+        _conv_shown_for = base
+    else:
+        if conv_drug == "": _conv_shown_for = ""
+        monitor.update_samples(steady)
+    if conv_drug != "":
+        var ri := RHYTHM_VALUES.find(base)
+        var rn := RHYTHM_NAMES[ri] if ri >= 0 else base
+        event_label.text = "✚ %s: купирование — %s → синусовый ритм" % [conv_drug, rn]
+    else:
+        event_label.text = ""
     monitor.queue_redraw()
 
 func _refresh_param_amps() -> void:
@@ -1489,6 +1540,8 @@ func _effective_params() -> Dictionary:
     var drh := _drug_rhythm()
     if drh != "":
         e["rhythm"] = drh
+    elif _active_converter(str(e["rhythm"])) != "":
+        e["rhythm"] = "sinus"  # купирование аритмии терапевтическим препаратом
     return e
 
 func _recompute() -> void:
