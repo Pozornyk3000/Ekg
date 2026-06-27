@@ -45,6 +45,12 @@ const DRUGS := [
     {"name": "Фуросемид", "d": {}, "sd": {"k": -1.0, "mg": -0.2}, "td": {}, "tsd": {"k": -1.8, "mg": -0.4}, "trhythm": "", "desc": "тер: ↓K/Mg. токс: гипокалиемия — U, ↑QT"},
 ]
 const DOSE_NAMES := ["Выкл", "Терапевт.", "Токсич."]
+const QUIZ_DIFF_NAMES := ["Все уровни", "Новичок", "Эксперт"]
+const QUIZ_CAT_NAMES := ["Все системы", "Аритмии / ЭКС", "Инфаркт / ишемия", "Блокады проводимости", "Гипертрофия / прочее"]
+const QUIZ_CAT_KEYS := ["", "arr", "mi", "block", "other"]
+# Тонкие («экспертные») паттерны — по ключевым словам в названии пресета.
+const QUIZ_HARD_KEYS := ["mitrale", "pulmonale", "реполяриз", "Wellens", "Бругада", "задний", "Гемиблок", "Мобитц", "Венкебах", "атлет", "Детское", "Трифасцикул", "Бифасцикул", "перегрузк", "undersensing", "захвата", "СССУ", "АВУРТ", "Двунаправ"]
+
 const STRESS_STAGES := ["Покой", "Ступень 1", "Ступень 2", "Ступень 3", "Ступень 4", "Пик нагрузки", "Восстановление 1 мин", "Восстановление 3 мин"]
 const STENOSIS_NAMES := ["Нет стеноза", "Умеренный стеноз", "Выраженный стеноз"]
 
@@ -151,6 +157,10 @@ var quiz_feedback: Label
 var quiz_explain: Label
 var quiz_score_label: Label
 var quiz_next_btn: Button
+var quiz_diff_opt: OptionButton
+var quiz_cat_opt: OptionButton
+var quiz_diff_idx := 0
+var quiz_cat_idx := 0
 
 func _ready() -> void:
     set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -557,6 +567,19 @@ func _build_quiz_tab(tabs: TabContainer) -> void:
     quiz_score_label.add_theme_font_size_override("font_size", 16)
     col.add_child(quiz_score_label)
 
+    _mk_label(col, "Уровень:", 13)
+    quiz_diff_opt = OptionButton.new()
+    quiz_diff_opt.custom_minimum_size = Vector2(0, 40)
+    for nm in QUIZ_DIFF_NAMES: quiz_diff_opt.add_item(nm)
+    quiz_diff_opt.item_selected.connect(_on_quiz_diff)
+    col.add_child(quiz_diff_opt)
+    _mk_label(col, "Система:", 13)
+    quiz_cat_opt = OptionButton.new()
+    quiz_cat_opt.custom_minimum_size = Vector2(0, 40)
+    for nm in QUIZ_CAT_NAMES: quiz_cat_opt.add_item(nm)
+    quiz_cat_opt.item_selected.connect(_on_quiz_cat)
+    col.add_child(quiz_cat_opt)
+
     _mk_label(col, "Определите диагноз по ЭКГ:", 15)
     var grid := GridContainer.new()
     grid.columns = 3
@@ -598,6 +621,44 @@ func _build_quiz_tab(tabs: TabContainer) -> void:
     quiz_next_btn.custom_minimum_size = Vector2(0, 46)
     quiz_next_btn.pressed.connect(_quiz_new)
     col.add_child(quiz_next_btn)
+
+func _on_quiz_diff(i: int) -> void:
+    quiz_diff_idx = i
+    _quiz_new()
+
+func _on_quiz_cat(i: int) -> void:
+    quiz_cat_idx = i
+    _quiz_new()
+
+func _quiz_category(pr: Dictionary) -> String:
+    var p: Dictionary = pr["p"]
+    var rh := str(p.get("rhythm", "sinus"))
+    if rh.begins_with("pace") or rh in ["afib", "aflutter", "avnrt", "vtach", "torsades", "bidirectional", "sss", "wenckebach", "mobitz2", "av3"]:
+        return "arr"
+    if str(p.get("bbb", "none")) != "none" or str(p.get("hemiblock", "none")) != "none":
+        return "block"
+    if float(p.get("st_x", 0.0)) != 0.0 or float(p.get("st_y", 0.0)) != 0.0 or float(p.get("st_z", 0.0)) != 0.0 or float(p.get("q_amp", 1.0)) >= 2.5 or float(p.get("t_post", 0.0)) > 0.0:
+        return "mi"
+    return "other"  # гипертрофия, электролиты, норма, синдромы (WPW и т.п.)
+
+func _quiz_is_hard(pr: Dictionary) -> bool:
+    var nm := str(pr["name"])
+    for kw in QUIZ_HARD_KEYS:
+        if kw in nm: return true
+    return false
+
+func _quiz_pool() -> Array:
+    var pool: Array = []
+    for i in PRESETS.size():
+        var pr: Dictionary = PRESETS[i]
+        if quiz_cat_idx > 0 and _quiz_category(pr) != QUIZ_CAT_KEYS[quiz_cat_idx]:
+            continue
+        if quiz_diff_idx == 1 and _quiz_is_hard(pr):
+            continue
+        if quiz_diff_idx == 2 and not _quiz_is_hard(pr):
+            continue
+        pool.append(i)
+    return pool
 
 func _quiz_build_eff(preset: Dictionary) -> Dictionary:
     # Считаем ЭКГ загадки в изоляции, не трогая глобальные параметры (не палим ответ).
@@ -641,11 +702,20 @@ func _quiz_new() -> void:
         return
     quiz_answered = false
     var n := PRESETS.size()
-    var correct := randi() % n
+    var pool := _quiz_pool()
+    if pool.is_empty():
+        for i in n: pool.append(i)
+    var correct: int = pool[randi() % pool.size()]
     quiz_options = [correct]
-    while quiz_options.size() < 4:
-        var d := randi() % n
+    # Дистракторы — из той же выборки (правдоподобнее), при нехватке добираем из всех.
+    var dpool := pool.duplicate()
+    dpool.shuffle()
+    for d in dpool:
+        if quiz_options.size() >= 4: break
         if not (d in quiz_options): quiz_options.append(d)
+    while quiz_options.size() < 4:
+        var d2 := randi() % n
+        if not (d2 in quiz_options): quiz_options.append(d2)
     quiz_options.shuffle()
     quiz_answer_idx = quiz_options.find(correct)
     for i in 4:
