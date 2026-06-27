@@ -985,8 +985,7 @@ func _quiz_new() -> void:
         lv.queue_redraw()
     if quiz_monitor:
         quiz_monitor.hr_bpm = float(eff.get("hr", 0.0))
-        quiz_monitor.samples = ECGModel.generate_monitor(eff, 1, 20000.0, 4000)
-        quiz_monitor.queue_redraw()
+        quiz_monitor.update_samples(ECGModel.generate_monitor(eff, 1, 20000.0, 4000))
     quiz_explain_text = _quiz_report(eff, gen)
     quiz_feedback.text = ""
     quiz_feedback.remove_theme_color_override("font_color")
@@ -1418,7 +1417,7 @@ func _refresh_monitor() -> void:
         lvj.queue_redraw()
     if _last_eff.is_empty(): return
     monitor.hr_bpm = float(_last_eff.get("hr", 0.0))
-    monitor.samples = ECGModel.generate_monitor(_last_eff, selected_lead, 20000.0, 4000)
+    monitor.update_samples(ECGModel.generate_monitor(_last_eff, selected_lead, 20000.0, 4000))
     monitor.lead_name = LEADS[selected_lead]
     monitor.queue_redraw()
 

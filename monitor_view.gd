@@ -16,6 +16,28 @@ var bg_c := Color(0.03, 0.06, 0.12)
 var trace_color := Color(0.45, 0.82, 1.0)
 var grid_c := Color(0.30, 0.50, 0.85)
 var hr_bpm := 0.0
+var _rpeaks := {}
+
+func update_samples(buf: PackedFloat32Array) -> void:
+    samples = buf
+    _detect_peaks()
+    queue_redraw()
+
+func _detect_peaks() -> void:
+    _rpeaks.clear()
+    var n := samples.size()
+    if n < 3:
+        return
+    var mx := 0.0
+    for s in samples:
+        mx = maxf(mx, absf(s))
+    var thr := maxf(mx * 0.5, 1.0)
+    var last := -999
+    for i in range(1, n - 1):
+        var a := absf(samples[i])
+        if a > thr and a >= absf(samples[i - 1]) and a > absf(samples[i + 1]) and i - last > 40:
+            _rpeaks[i] = true
+            last = i
 
 func _process(delta: float) -> void:
     if samples.size() > 1:
@@ -78,11 +100,17 @@ func _draw_seg(i0: int, i1: int, nshow: int, sweep: int, n: int, w: float, mid: 
     if i1 <= i0:
         return
     var pts := PackedVector2Array()
+    var dots := PackedVector2Array()
     for i in range(i0, i1 + 1):
         var src := sweep * nshow + i
         var idx := ((src % n) + n) % n
-        pts.append(Vector2(i / float(nshow - 1) * w, mid - samples[idx] * PX_PER_MM))
+        var pt := Vector2(i / float(nshow - 1) * w, mid - samples[idx] * PX_PER_MM)
+        pts.append(pt)
+        if _rpeaks.has(idx):
+            dots.append(pt)
     if pts.size() < 2:
         return
     draw_polyline(pts, Color(trace_color, 0.16), 6.0, true)
     draw_polyline(pts, trace_color, 2.2, true)
+    for d in dots:
+        draw_circle(Vector2(d.x, d.y - 10.0), 3.6, Color(1.0, 0.82, 0.3))
