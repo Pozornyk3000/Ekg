@@ -154,6 +154,9 @@ static func _gen_events(p: Dictionary, window: float = WINDOW_MS) -> Dictionary:
             vent.append({"t": tv, "kind": "vt"})
             tv += esc
         return {"atrial": atrial, "vent": vent, "afib": false}
+    elif rhythm == "asystole":
+        # Асистолия: нет электрической активности — изолиния (не шоковый ритм).
+        return {"atrial": [], "vent": [], "afib": false}
     elif rhythm == "sss":
         # СССУ / синусовые паузы: периодически СА-узел не срабатывает (нет P) — длинная
         # пауза, которую перебивает узловой выскальзывающий комплекс (узкий QRS без P).
@@ -990,6 +993,7 @@ static func pathology_probabilities(p: Dictionary, s: Dictionary) -> Array:
     elif rhythm == "torsades": out.append({"name": "Пируэтная тахикардия (Torsades)", "prob": 0.97})
     elif rhythm == "bidirectional": out.append({"name": "Двунаправленная ЖТ (дигоксин)", "prob": 0.96})
     elif rhythm == "avnrt": out.append({"name": "АВУРТ (узловая тахикардия)", "prob": 0.94})
+    elif rhythm == "asystole": out.append({"name": "Асистолия (остановка кровообращения)", "prob": 0.98})
     elif rhythm == "sss": out.append({"name": "СССУ (синусовые паузы)", "prob": 0.9})
     elif rhythm == "wenckebach": out.append({"name": "AV-блокада 2 ст. Мобитц I (Венкебах)", "prob": 0.93})
     elif rhythm == "mobitz2": out.append({"name": "AV-блокада 2 ст. Мобитц II", "prob": 0.93})
@@ -1080,6 +1084,8 @@ static func ecg_report(p: Dictionary, sok: Dictionary, axis_lbl: String, res: Di
         line1 = "Ритм: трепетание предсердий, пилообразные волны F ~300/мин, проведение %d:1, ЧСС жел. ~%d." % [ratio, hr]
     elif rhythm == "avnrt":
         line1 = "Ритм: АВ-узловая реципрокная тахикардия (АВУРТ), ЧСС %d — узкие комплексы, P не виден (ретроградный, скрыт в QRS)." % hr
+    elif rhythm == "asystole":
+        line1 = "Ритм: АСИСТОЛИЯ — отсутствие электрической активности (изолиния). Немедленно СЛР + адреналин. НЕ шоковый ритм."
     elif rhythm == "sss":
         line1 = "Ритм: синдром слабости синусового узла — синусовые паузы с узловыми выскальзывающими комплексами (ЧСС синуса %d)." % hr
     elif rhythm == "vtach":
@@ -1194,7 +1200,10 @@ static func wellbeing(p: Dictionary, s: Dictionary) -> Dictionary:
     var issues: Array = []
     var sev := 0
 
-    if rhythm == "vtach":
+    if rhythm == "asystole":
+        issues.append("АСИСТОЛИЯ — клиническая смерть, немедленная СЛР")
+        sev = maxi(sev, 3)
+    elif rhythm == "vtach":
         issues.append("желудочковая тахикардия — угроза остановки")
         sev = maxi(sev, 3)
     elif rhythm == "torsades":
@@ -1229,7 +1238,7 @@ static func wellbeing(p: Dictionary, s: Dictionary) -> Dictionary:
         issues.append("тяжёлая гипокалиемия — аритмии")
         sev = maxi(sev, 2)
 
-    if rhythm != "vtach" and rhythm != "av3" and rhythm != "torsades" and rhythm != "bidirectional" and rhythm != "avnrt" and not rhythm.begins_with("pace"):
+    if rhythm != "vtach" and rhythm != "av3" and rhythm != "torsades" and rhythm != "bidirectional" and rhythm != "avnrt" and rhythm != "asystole" and not rhythm.begins_with("pace"):
         if hr >= 180.0:
             issues.append("крайняя тахикардия")
             sev = maxi(sev, 3)

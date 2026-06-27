@@ -17,8 +17,8 @@ const STATE_DEFAULTS := {
     "k": 4.0, "ca": 2.4, "mg": 0.85, "na": 140.0,
     "bp_sys": 120.0, "bp_dia": 80.0,
 }
-const RHYTHM_NAMES := ["Синусовый", "Фибрилляция предсердий", "Трепетание предсердий (волны F)", "АВУРТ (узловая тахикардия)", "Желудочковая тахикардия", "Тахикардия пируэт (Torsades)", "Двунаправленная ЖТ (дигоксин)", "СССУ / синусовые паузы", "AV-блокада 2 ст. Мобитц I (Венкебах)", "AV-блокада 2 ст. Мобитц II", "Полная AV-блокада", "ЭКС желудочковый (VVI)", "ЭКС предсердный (AAI)", "ЭКС двухкамерный (DDD)", "ЭКС бивентрикулярный (BiV/CRT)"]
-const RHYTHM_VALUES := ["sinus", "afib", "aflutter", "avnrt", "vtach", "torsades", "bidirectional", "sss", "wenckebach", "mobitz2", "av3", "pace_vvi", "pace_aai", "pace_ddd", "pace_biv"]
+const RHYTHM_NAMES := ["Синусовый", "Фибрилляция предсердий", "Трепетание предсердий (волны F)", "АВУРТ (узловая тахикардия)", "Желудочковая тахикардия", "Тахикардия пируэт (Torsades)", "Двунаправленная ЖТ (дигоксин)", "СССУ / синусовые паузы", "AV-блокада 2 ст. Мобитц I (Венкебах)", "AV-блокада 2 ст. Мобитц II", "Полная AV-блокада", "Асистолия", "ЭКС желудочковый (VVI)", "ЭКС предсердный (AAI)", "ЭКС двухкамерный (DDD)", "ЭКС бивентрикулярный (BiV/CRT)"]
+const RHYTHM_VALUES := ["sinus", "afib", "aflutter", "avnrt", "vtach", "torsades", "bidirectional", "sss", "wenckebach", "mobitz2", "av3", "asystole", "pace_vvi", "pace_aai", "pace_ddd", "pace_biv"]
 const PACE_FAULT_NAMES := ["ЭКС: норма", "Потеря захвата", "Undersensing (асинхронно)"]
 const PACE_FAULT_VALUES := ["none", "loss_capture", "undersense"]
 const PVC_NAMES := ["Нет", "Редкие", "Частые"]
@@ -57,6 +57,8 @@ const DRUG_CONV := {
     "Верапамил/Дилтиазем": ["avnrt"],
     "Аденозин": ["avnrt"],
     "Магния сульфат": ["torsades"],
+    "Адреналин": ["asystole"],
+    "Атропин": ["sss", "av3", "wenckebach"],
 }
 const DOSE_NAMES := ["Выкл", "Терапевт.", "Токсич."]
 const QUIZ_DIFF_NAMES := ["Все уровни", "Новичок", "Эксперт"]
@@ -87,6 +89,7 @@ const PRESETS := [
     {"name": "Синусовая тахикардия", "p": {"hr": 130.0}, "s": {}},
     {"name": "Желудочковая тахикардия", "p": {"rhythm": "vtach", "hr": 180.0}, "s": {}},
     {"name": "Двунаправленная ЖТ (дигоксин)", "p": {"rhythm": "bidirectional", "hr": 150.0, "p_amp": 0.0, "qrs_dur": 130.0}, "s": {}},
+    {"name": "Асистолия (изолиния)", "p": {"rhythm": "asystole", "hr": 50.0, "p_amp": 0.0}, "s": {"bp_sys": 0.0, "bp_dia": 0.0}},
     {"name": "АВУРТ (узловая тахикардия)", "p": {"rhythm": "avnrt", "hr": 180.0, "p_amp": 0.0}, "s": {}},
     {"name": "СССУ / синусовые паузы", "p": {"rhythm": "sss", "hr": 60.0}, "s": {}},
     {"name": "Трифасцикулярная блокада", "p": {"bbb": "rbbb", "hemiblock": "lafb", "qrs_axis": -35.0, "qrs_dur": 140.0, "pr": 240.0}, "s": {}},
@@ -1492,10 +1495,10 @@ func _refresh_monitor() -> void:
         lvj.highlighted = (j == selected_lead)
         lvj.queue_redraw()
     if _last_eff.is_empty(): return
-    monitor.hr_bpm = float(_last_eff.get("hr", 0.0))
     monitor.lead_name = LEADS[selected_lead]
     var base := str(params.get("rhythm", "sinus"))
     var effr := str(_last_eff.get("rhythm", "sinus"))
+    monitor.hr_bpm = 0.0 if effr == "asystole" else float(_last_eff.get("hr", 0.0))
     var steady := ECGModel.generate_monitor(_last_eff, selected_lead, 20000.0, 4000)
     var sig := base + ">" + effr
     if effr != base and sig != _conv_shown_for and not edit_mode:
@@ -1510,7 +1513,10 @@ func _refresh_monitor() -> void:
         monitor.update_samples(steady)
     if effr != base:
         if effr == "sinus":
-            event_label.text = "✚ %s: купирование — %s → синусовый ритм" % [_active_converter(base), _rhythm_rus(base)]
+            if base == "asystole":
+                event_label.text = "✚ %s: восстановление ритма (ROSC) — асистолия → синус" % _active_converter(base)
+            else:
+                event_label.text = "✚ %s: купирование — %s → синусовый ритм" % [_active_converter(base), _rhythm_rus(base)]
             event_label.add_theme_color_override("font_color", Color(0.35, 1.0, 0.6))
         else:
             event_label.text = "⚠ %s (токсичность): %s" % [_toxic_drug(effr), _rhythm_rus(effr)]
@@ -1665,6 +1671,9 @@ func _recompute() -> void:
     elif rhythm == "av3":
         primary_dx = "Полная AV-блокада (диссоциация)"
         primary_conf = 0.9
+    elif rhythm == "asystole":
+        primary_dx = "АСИСТОЛИЯ — остановка кровообращения"
+        primary_conf = 0.97
     elif rhythm == "pace_vvi":
         var pf := str(params.get("pace_fault", "none"))
         if pf == "loss_capture":
