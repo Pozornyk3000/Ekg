@@ -17,8 +17,16 @@ const STATE_DEFAULTS := {
     "k": 4.0, "ca": 2.4, "mg": 0.85, "na": 140.0,
     "bp_sys": 120.0, "bp_dia": 80.0,
 }
-const RHYTHM_NAMES := ["Синусовый", "Фибрилляция предсердий", "Трепетание предсердий (волны F)", "АВУРТ (узловая тахикардия)", "Желудочковая тахикардия", "Фибрилляция желудочков", "Тахикардия пируэт (Torsades)", "Двунаправленная ЖТ (дигоксин)", "ЭМД / PEA (без пульса)", "СССУ / синусовые паузы", "AV-блокада 2 ст. Мобитц I (Венкебах)", "AV-блокада 2 ст. Мобитц II", "Полная AV-блокада", "Асистолия", "ЭКС желудочковый (VVI)", "ЭКС предсердный (AAI)", "ЭКС двухкамерный (DDD)", "ЭКС бивентрикулярный (BiV/CRT)"]
-const RHYTHM_VALUES := ["sinus", "afib", "aflutter", "avnrt", "vtach", "vfib", "torsades", "bidirectional", "pea", "sss", "wenckebach", "mobitz2", "av3", "asystole", "pace_vvi", "pace_aai", "pace_ddd", "pace_biv"]
+const RHYTHM_NAMES := ["Синусовый", "Фибрилляция предсердий", "Трепетание предсердий (волны F)", "АВУРТ (узловая тахикардия)", "Желудочковая тахикардия", "Фибрилляция желудочков (крупноволновая)", "ФЖ мелковолновая", "Тахикардия пируэт (Torsades)", "Двунаправленная ЖТ (дигоксин)", "ЭМД / PEA (без пульса)", "СССУ / синусовые паузы", "AV-блокада 2 ст. Мобитц I (Венкебах)", "AV-блокада 2 ст. Мобитц II", "Полная AV-блокада", "Асистолия", "ЭКС желудочковый (VVI)", "ЭКС предсердный (AAI)", "ЭКС двухкамерный (DDD)", "ЭКС бивентрикулярный (BiV/CRT)"]
+const RHYTHM_VALUES := ["sinus", "afib", "aflutter", "avnrt", "vtach", "vfib", "vfib_fine", "torsades", "bidirectional", "pea", "sss", "wenckebach", "mobitz2", "av3", "asystole", "pace_vvi", "pace_aai", "pace_ddd", "pace_biv"]
+# Группировка ритмов в выпадающем списке (подсписки с заголовками).
+const RHYTHM_GROUPS := [
+    ["Наджелудочковые", ["sinus", "afib", "aflutter", "avnrt"]],
+    ["Желудочковые тахикардии", ["vtach", "torsades", "bidirectional"]],
+    ["Остановка кровообращения", ["vfib", "vfib_fine", "pea", "asystole"]],
+    ["Блокады и паузы", ["wenckebach", "mobitz2", "av3", "sss"]],
+    ["Кардиостимулятор", ["pace_vvi", "pace_aai", "pace_ddd", "pace_biv"]],
+]
 const PACE_FAULT_NAMES := ["ЭКС: норма", "Потеря захвата", "Undersensing (асинхронно)"]
 const PACE_FAULT_VALUES := ["none", "loss_capture", "undersense"]
 const PVC_NAMES := ["Нет", "Редкие", "Частые"]
@@ -90,6 +98,7 @@ const PRESETS := [
     {"name": "Желудочковая тахикардия", "p": {"rhythm": "vtach", "hr": 180.0}, "s": {}},
     {"name": "Двунаправленная ЖТ (дигоксин)", "p": {"rhythm": "bidirectional", "hr": 150.0, "p_amp": 0.0, "qrs_dur": 130.0}, "s": {}},
     {"name": "Фибрилляция желудочков", "p": {"rhythm": "vfib", "hr": 60.0, "p_amp": 0.0}, "s": {"bp_sys": 0.0, "bp_dia": 0.0}},
+    {"name": "ФЖ мелковолновая", "p": {"rhythm": "vfib_fine", "hr": 60.0, "p_amp": 0.0}, "s": {"bp_sys": 0.0, "bp_dia": 0.0}},
     {"name": "ЭМД / PEA (без пульса)", "p": {"rhythm": "pea", "hr": 30.0, "p_amp": 0.0, "qrs_dur": 150.0}, "s": {"bp_sys": 0.0, "bp_dia": 0.0}},
     {"name": "Асистолия (изолиния)", "p": {"rhythm": "asystole", "hr": 50.0, "p_amp": 0.0}, "s": {"bp_sys": 0.0, "bp_dia": 0.0}},
     {"name": "АВУРТ (узловая тахикардия)", "p": {"rhythm": "avnrt", "hr": 180.0, "p_amp": 0.0}, "s": {}},
@@ -162,8 +171,8 @@ const PALETTES := {
     "light": {"name": "Светлая", "bg": "#e9eef6", "panel": "#ffffff", "panel2": "#eef3fb", "hover": "#dbe6f7", "accent": "#2f6df0", "accent_d": "#9fbcf0", "border": "#cdd9ee", "text": "#16233e", "dim": "#5d6e8e", "darktxt": "#ffffff", "trace": "#4db0ff", "mon_bg": "#081326", "grid": "#2a4f8f"},
 }
 const THEME_ORDER := ["blue", "green", "light"]
-const SHOCKABLE := ["vtach", "vfib", "torsades", "bidirectional", "afib", "aflutter", "avnrt"]
-const CRITICAL := ["vfib", "vtach", "torsades", "bidirectional", "asystole", "pea"]
+const SHOCKABLE := ["vtach", "vfib", "vfib_fine", "torsades", "bidirectional", "afib", "aflutter", "avnrt"]
+const CRITICAL := ["vfib", "vfib_fine", "vtach", "torsades", "bidirectional", "asystole", "pea"]
 var prob_label: Label
 var diff_label: Label
 var drug_summary: Label
@@ -440,8 +449,14 @@ func _build_monitor_tab(tabs: TabContainer) -> void:
     _mk_label(col, "Ритм:", 14)
     rhythm_opt = OptionButton.new()
     rhythm_opt.custom_minimum_size = Vector2(0, 42)
-    for n in RHYTHM_NAMES:
-        rhythm_opt.add_item(n)
+    # Сгруппированный список: заголовок-разделитель + пункты; id пункта = индекс в RHYTHM_VALUES.
+    for grp in RHYTHM_GROUPS:
+        rhythm_opt.add_separator(str(grp[0]))
+        for val in grp[1]:
+            var vi: int = RHYTHM_VALUES.find(val)
+            var item := rhythm_opt.item_count
+            rhythm_opt.add_item(RHYTHM_NAMES[vi])
+            rhythm_opt.set_item_id(item, vi)
     rhythm_opt.item_selected.connect(_on_rhythm)
     col.add_child(rhythm_opt)
 
@@ -1222,7 +1237,10 @@ func _stress_refresh_display() -> void:
             ECGModel.stress_verdict(peak_depr), ECGModel.stress_bp_verdict(stress_sten)]
 
 func _on_rhythm(idx: int) -> void:
-    params["rhythm"] = RHYTHM_VALUES[idx]
+    var vi := rhythm_opt.get_item_id(idx)  # id пункта = индекс в RHYTHM_VALUES
+    if vi < 0 or vi >= RHYTHM_VALUES.size():
+        return
+    params["rhythm"] = RHYTHM_VALUES[vi]
     _recompute()
 
 func _on_bbb(idx: int) -> void:
@@ -1324,7 +1342,10 @@ func _on_lead_opt(idx: int) -> void:
 
 func _sync_selectors() -> void:
     var ri := RHYTHM_VALUES.find(str(params["rhythm"]))
-    rhythm_opt.selected = ri if ri >= 0 else 0
+    for ii in rhythm_opt.item_count:  # выбрать пункт с нужным id (списки сгруппированы)
+        if rhythm_opt.get_item_id(ii) == ri:
+            rhythm_opt.selected = ii
+            break
     var bi := BBB_VALUES.find(str(params["bbb"]))
     bbb_opt.selected = bi if bi >= 0 else 0
     var fi := FOCUS_VALUES.find(str(params.get("vt_focus", "lv_lat_mid")))
@@ -1502,7 +1523,7 @@ func _refresh_monitor() -> void:
     monitor.lead_name = LEADS[selected_lead]
     var base := str(params.get("rhythm", "sinus"))
     var effr := str(_last_eff.get("rhythm", "sinus"))
-    monitor.hr_bpm = 0.0 if (effr == "asystole" or effr == "vfib") else float(_last_eff.get("hr", 0.0))
+    monitor.hr_bpm = 0.0 if effr in ["asystole", "vfib", "vfib_fine"] else float(_last_eff.get("hr", 0.0))
     monitor.alarm = effr in CRITICAL
     monitor.alarm_text = "⚠ ТРЕВОГА: " + _rhythm_rus(effr) if monitor.alarm else ""
     var steady := ECGModel.generate_monitor(_last_eff, selected_lead, 20000.0, 4000)
@@ -1680,6 +1701,9 @@ func _recompute() -> void:
     elif rhythm == "vfib":
         primary_dx = "ФИБРИЛЛЯЦИЯ ЖЕЛУДОЧКОВ — остановка кровообращения"
         primary_conf = 0.98
+    elif rhythm == "vfib_fine":
+        primary_dx = "Мелковолновая ФЖ — остановка кровообращения"
+        primary_conf = 0.9
     elif rhythm == "pea":
         primary_dx = "ЭМД / PEA — электрическая активность без пульса"
         primary_conf = 0.95

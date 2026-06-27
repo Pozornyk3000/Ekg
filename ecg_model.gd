@@ -155,8 +155,11 @@ static func _gen_events(p: Dictionary, window: float = WINDOW_MS) -> Dictionary:
             tv += esc
         return {"atrial": atrial, "vent": vent, "afib": false}
     elif rhythm == "vfib":
-        # Фибрилляция желудочков: хаос без QRS (шоковый ритм).
-        return {"atrial": [], "vent": [], "afib": false, "vfib": true}
+        # Крупноволновая фибрилляция желудочков: хаос без QRS (шоковый ритм).
+        return {"atrial": [], "vent": [], "afib": false, "vfib": true, "vfib_amp": 1.0}
+    elif rhythm == "vfib_fine":
+        # Мелковолновая ФЖ: низкая амплитуда, похожа на асистолию (по-прежнему шоковая).
+        return {"atrial": [], "vent": [], "afib": false, "vfib": true, "vfib_amp": 0.28}
     elif rhythm == "pea":
         # ЭМД/PEA: организованная (медленная широкая) электрическая активность без пульса.
         var tpe := 0.0
@@ -736,6 +739,7 @@ static func _render_one(p: Dictionary, lead: int, ev: Dictionary, bs: Dictionary
     var fcycle: float = ev.get("fcycle", 200.0)
     var fl_proj := lv.dot(_FLUTTER_VEC.normalized()) * _FLUTTER_AMP
     var vfib: bool = ev.get("vfib", false)
+    var vfib_amp: float = ev.get("vfib_amp", 1.0)
     var retro_p: bool = ev.get("retro_p", false)
     # Ретроградный P (АВУРТ): вектор кверху → отриц. в нижних (псевдо-S), полож. в V1.
     var retro_proj := lv.dot(Vector3(0.0, -0.8, -0.3).normalized()) * 1.7
@@ -801,7 +805,7 @@ static func _render_one(p: Dictionary, lead: int, ev: Dictionary, bs: Dictionary
         if flutter:
             v += fl_proj * _saw(ts, fcycle)
         if vfib:
-            v += _vfib_wave(ts, lead)
+            v += _vfib_wave(ts, lead) * vfib_amp
         buf[si] = v
     return buf
 
@@ -1023,6 +1027,7 @@ static func pathology_probabilities(p: Dictionary, s: Dictionary) -> Array:
     elif rhythm == "bidirectional": out.append({"name": "Двунаправленная ЖТ (дигоксин)", "prob": 0.96})
     elif rhythm == "avnrt": out.append({"name": "АВУРТ (узловая тахикардия)", "prob": 0.94})
     elif rhythm == "vfib": out.append({"name": "Фибрилляция желудочков", "prob": 0.99})
+    elif rhythm == "vfib_fine": out.append({"name": "Мелковолновая ФЖ", "prob": 0.9})
     elif rhythm == "pea": out.append({"name": "ЭМД / PEA (без пульса)", "prob": 0.95})
     elif rhythm == "asystole": out.append({"name": "Асистолия (остановка кровообращения)", "prob": 0.98})
     elif rhythm == "sss": out.append({"name": "СССУ (синусовые паузы)", "prob": 0.9})
@@ -1116,7 +1121,9 @@ static func ecg_report(p: Dictionary, sok: Dictionary, axis_lbl: String, res: Di
     elif rhythm == "avnrt":
         line1 = "Ритм: АВ-узловая реципрокная тахикардия (АВУРТ), ЧСС %d — узкие комплексы, P не виден (ретроградный, скрыт в QRS)." % hr
     elif rhythm == "vfib":
-        line1 = "Ритм: ФИБРИЛЛЯЦИЯ ЖЕЛУДОЧКОВ — хаотичные волны без QRS. Остановка кровообращения: немедленная дефибрилляция + СЛР."
+        line1 = "Ритм: ФИБРИЛЛЯЦИЯ ЖЕЛУДОЧКОВ (крупноволновая) — хаотичные волны без QRS. Остановка: немедленная дефибрилляция + СЛР."
+    elif rhythm == "vfib_fine":
+        line1 = "Ритм: МЕЛКОВОЛНОВАЯ ФЖ — низкоамплитудный хаос (похожа на асистолию). Шоковый ритм; СЛР + дефибрилляция."
     elif rhythm == "pea":
         line1 = "Ритм: ЭМД/PEA — организованная электрическая активность (медленные широкие комплексы) БЕЗ ПУЛЬСА. СЛР + адреналин, искать обратимые причины (4Г/4Т). НЕ шоковый."
     elif rhythm == "asystole":
@@ -1235,7 +1242,7 @@ static func wellbeing(p: Dictionary, s: Dictionary) -> Dictionary:
     var issues: Array = []
     var sev := 0
 
-    if rhythm == "vfib":
+    if rhythm == "vfib" or rhythm == "vfib_fine":
         issues.append("ФИБРИЛЛЯЦИЯ ЖЕЛУДОЧКОВ — остановка, немедленная дефибрилляция")
         sev = maxi(sev, 3)
     elif rhythm == "pea":
@@ -1279,7 +1286,7 @@ static func wellbeing(p: Dictionary, s: Dictionary) -> Dictionary:
         issues.append("тяжёлая гипокалиемия — аритмии")
         sev = maxi(sev, 2)
 
-    if rhythm != "vtach" and rhythm != "vfib" and rhythm != "pea" and rhythm != "av3" and rhythm != "torsades" and rhythm != "bidirectional" and rhythm != "avnrt" and rhythm != "asystole" and not rhythm.begins_with("pace"):
+    if rhythm != "vtach" and rhythm != "vfib" and rhythm != "vfib_fine" and rhythm != "pea" and rhythm != "av3" and rhythm != "torsades" and rhythm != "bidirectional" and rhythm != "avnrt" and rhythm != "asystole" and not rhythm.begins_with("pace"):
         if hr >= 180.0:
             issues.append("крайняя тахикардия")
             sev = maxi(sev, 3)
