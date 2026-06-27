@@ -180,8 +180,25 @@ var exam_score := 0
 var exam_misses: Array = []
 const EXAM_TOTAL := 10
 
+const SETTINGS_PATH := "user://settings.cfg"
+
+func _load_settings() -> void:
+    var cfg := ConfigFile.new()
+    if cfg.load(SETTINGS_PATH) != OK:
+        return
+    var saved := str(cfg.get_value("ui", "theme", theme_name))
+    if PALETTES.has(saved):
+        theme_name = saved
+
+func _save_settings() -> void:
+    var cfg := ConfigFile.new()
+    cfg.load(SETTINGS_PATH)  # сохранить прочие ключи, если есть
+    cfg.set_value("ui", "theme", theme_name)
+    cfg.save(SETTINGS_PATH)
+
 func _ready() -> void:
     set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+    _load_settings()
     theme = _build_theme(_pal(theme_name))
     bg_rect = ColorRect.new()
     bg_rect.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -283,6 +300,7 @@ func _apply_theme(name: String) -> void:
         if is_instance_valid(bar): bar.color = P["accent"]
     if theme_btn:
         theme_btn.text = "Тема: " + str(PALETTES[name]["name"])
+    _save_settings()
 
 func _cycle_theme() -> void:
     var i := THEME_ORDER.find(theme_name)
