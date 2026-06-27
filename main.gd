@@ -158,6 +158,7 @@ var stress_run_btn: Button
 var stress_timer: Timer
 var stress_running := false
 var quiz_lead_views: Array = []
+var quiz_monitor: MonitorView
 var quiz_answer_btns: Array = []
 var quiz_options: Array = []
 var quiz_answer_idx := -1
@@ -285,11 +286,12 @@ func _apply_theme(name: String) -> void:
     var P := _pal(name)
     theme = _build_theme(P)
     if bg_rect: bg_rect.color = P["bg"]
-    if monitor:
-        monitor.bg_c = P["mon_bg"]
-        monitor.trace_color = P["trace"]
-        monitor.grid_c = P["grid"]
-        monitor.queue_redraw()
+    for mon in [monitor, quiz_monitor]:
+        if mon:
+            mon.bg_c = P["mon_bg"]
+            mon.trace_color = P["trace"]
+            mon.grid_c = P["grid"]
+            mon.queue_redraw()
     for arr in [lead_views, quiz_lead_views]:
         for lv in arr:
             lv.bg_c = P["mon_bg"]
@@ -773,6 +775,13 @@ func _build_quiz_tab(tabs: TabContainer) -> void:
     quiz_cat_opt.item_selected.connect(_on_quiz_cat)
     col.add_child(quiz_cat_opt)
 
+    _mk_label(col, "Ритм (бегущая лента, II):", 14)
+    quiz_monitor = MonitorView.new()
+    quiz_monitor.custom_minimum_size = Vector2(0, 130)
+    quiz_monitor.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    quiz_monitor.clip_contents = true
+    col.add_child(quiz_monitor)
+
     _mk_label(col, "Определите диагноз по ЭКГ:", 15)
     var grid := GridContainer.new()
     grid.columns = 3
@@ -964,6 +973,9 @@ func _quiz_new() -> void:
         var lv: LeadView = quiz_lead_views[i]
         lv.samples = bufs[i]
         lv.queue_redraw()
+    if quiz_monitor:
+        quiz_monitor.samples = ECGModel.generate_monitor(eff, 1, 20000.0, 4000)
+        quiz_monitor.queue_redraw()
     quiz_explain_text = _quiz_report(eff, gen)
     quiz_feedback.text = ""
     quiz_feedback.remove_theme_color_override("font_color")
