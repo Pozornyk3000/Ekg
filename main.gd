@@ -17,8 +17,8 @@ const STATE_DEFAULTS := {
     "k": 4.0, "ca": 2.4, "mg": 0.85, "na": 140.0,
     "bp_sys": 120.0, "bp_dia": 80.0,
 }
-const RHYTHM_NAMES := ["Синусовый", "Фибрилляция предсердий", "Трепетание предсердий (волны F)", "АВУРТ (узловая тахикардия)", "Желудочковая тахикардия", "Фибрилляция желудочков", "Тахикардия пируэт (Torsades)", "Двунаправленная ЖТ (дигоксин)", "СССУ / синусовые паузы", "AV-блокада 2 ст. Мобитц I (Венкебах)", "AV-блокада 2 ст. Мобитц II", "Полная AV-блокада", "Асистолия", "ЭКС желудочковый (VVI)", "ЭКС предсердный (AAI)", "ЭКС двухкамерный (DDD)", "ЭКС бивентрикулярный (BiV/CRT)"]
-const RHYTHM_VALUES := ["sinus", "afib", "aflutter", "avnrt", "vtach", "vfib", "torsades", "bidirectional", "sss", "wenckebach", "mobitz2", "av3", "asystole", "pace_vvi", "pace_aai", "pace_ddd", "pace_biv"]
+const RHYTHM_NAMES := ["Синусовый", "Фибрилляция предсердий", "Трепетание предсердий (волны F)", "АВУРТ (узловая тахикардия)", "Желудочковая тахикардия", "Фибрилляция желудочков", "Тахикардия пируэт (Torsades)", "Двунаправленная ЖТ (дигоксин)", "ЭМД / PEA (без пульса)", "СССУ / синусовые паузы", "AV-блокада 2 ст. Мобитц I (Венкебах)", "AV-блокада 2 ст. Мобитц II", "Полная AV-блокада", "Асистолия", "ЭКС желудочковый (VVI)", "ЭКС предсердный (AAI)", "ЭКС двухкамерный (DDD)", "ЭКС бивентрикулярный (BiV/CRT)"]
+const RHYTHM_VALUES := ["sinus", "afib", "aflutter", "avnrt", "vtach", "vfib", "torsades", "bidirectional", "pea", "sss", "wenckebach", "mobitz2", "av3", "asystole", "pace_vvi", "pace_aai", "pace_ddd", "pace_biv"]
 const PACE_FAULT_NAMES := ["ЭКС: норма", "Потеря захвата", "Undersensing (асинхронно)"]
 const PACE_FAULT_VALUES := ["none", "loss_capture", "undersense"]
 const PVC_NAMES := ["Нет", "Редкие", "Частые"]
@@ -57,7 +57,7 @@ const DRUG_CONV := {
     "Верапамил/Дилтиазем": ["avnrt"],
     "Аденозин": ["avnrt"],
     "Магния сульфат": ["torsades"],
-    "Адреналин": ["asystole"],
+    "Адреналин": ["asystole", "pea"],
     "Атропин": ["sss", "av3", "wenckebach"],
 }
 const DOSE_NAMES := ["Выкл", "Терапевт.", "Токсич."]
@@ -90,6 +90,7 @@ const PRESETS := [
     {"name": "Желудочковая тахикардия", "p": {"rhythm": "vtach", "hr": 180.0}, "s": {}},
     {"name": "Двунаправленная ЖТ (дигоксин)", "p": {"rhythm": "bidirectional", "hr": 150.0, "p_amp": 0.0, "qrs_dur": 130.0}, "s": {}},
     {"name": "Фибрилляция желудочков", "p": {"rhythm": "vfib", "hr": 60.0, "p_amp": 0.0}, "s": {"bp_sys": 0.0, "bp_dia": 0.0}},
+    {"name": "ЭМД / PEA (без пульса)", "p": {"rhythm": "pea", "hr": 30.0, "p_amp": 0.0, "qrs_dur": 150.0}, "s": {"bp_sys": 0.0, "bp_dia": 0.0}},
     {"name": "Асистолия (изолиния)", "p": {"rhythm": "asystole", "hr": 50.0, "p_amp": 0.0}, "s": {"bp_sys": 0.0, "bp_dia": 0.0}},
     {"name": "АВУРТ (узловая тахикардия)", "p": {"rhythm": "avnrt", "hr": 180.0, "p_amp": 0.0}, "s": {}},
     {"name": "СССУ / синусовые паузы", "p": {"rhythm": "sss", "hr": 60.0}, "s": {}},
@@ -162,7 +163,7 @@ const PALETTES := {
 }
 const THEME_ORDER := ["blue", "green", "light"]
 const SHOCKABLE := ["vtach", "vfib", "torsades", "bidirectional", "afib", "aflutter", "avnrt"]
-const CRITICAL := ["vfib", "vtach", "torsades", "bidirectional", "asystole"]
+const CRITICAL := ["vfib", "vtach", "torsades", "bidirectional", "asystole", "pea"]
 var prob_label: Label
 var diff_label: Label
 var drug_summary: Label
@@ -1518,8 +1519,8 @@ func _refresh_monitor() -> void:
         monitor.update_samples(steady)
     if effr != base:
         if effr == "sinus":
-            if base == "asystole":
-                event_label.text = "✚ %s: восстановление ритма (ROSC) — асистолия → синус" % _active_converter(base)
+            if base == "asystole" or base == "pea":
+                event_label.text = "✚ %s: восстановление ритма (ROSC) — %s → синус" % [_active_converter(base), _rhythm_rus(base)]
             else:
                 event_label.text = "✚ %s: купирование — %s → синусовый ритм" % [_active_converter(base), _rhythm_rus(base)]
             event_label.add_theme_color_override("font_color", Color(0.35, 1.0, 0.6))
@@ -1679,6 +1680,9 @@ func _recompute() -> void:
     elif rhythm == "vfib":
         primary_dx = "ФИБРИЛЛЯЦИЯ ЖЕЛУДОЧКОВ — остановка кровообращения"
         primary_conf = 0.98
+    elif rhythm == "pea":
+        primary_dx = "ЭМД / PEA — электрическая активность без пульса"
+        primary_conf = 0.95
     elif rhythm == "asystole":
         primary_dx = "АСИСТОЛИЯ — остановка кровообращения"
         primary_conf = 0.97

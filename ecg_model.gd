@@ -157,6 +157,13 @@ static func _gen_events(p: Dictionary, window: float = WINDOW_MS) -> Dictionary:
     elif rhythm == "vfib":
         # Фибрилляция желудочков: хаос без QRS (шоковый ритм).
         return {"atrial": [], "vent": [], "afib": false, "vfib": true}
+    elif rhythm == "pea":
+        # ЭМД/PEA: организованная (медленная широкая) электрическая активность без пульса.
+        var tpe := 0.0
+        while tpe < window:
+            vent.append({"t": tpe, "kind": "vt"})
+            tpe += rr
+        return {"atrial": [], "vent": vent, "afib": false}
     elif rhythm == "asystole":
         # Асистолия: нет электрической активности — изолиния (не шоковый ритм).
         return {"atrial": [], "vent": [], "afib": false}
@@ -1016,6 +1023,7 @@ static func pathology_probabilities(p: Dictionary, s: Dictionary) -> Array:
     elif rhythm == "bidirectional": out.append({"name": "Двунаправленная ЖТ (дигоксин)", "prob": 0.96})
     elif rhythm == "avnrt": out.append({"name": "АВУРТ (узловая тахикардия)", "prob": 0.94})
     elif rhythm == "vfib": out.append({"name": "Фибрилляция желудочков", "prob": 0.99})
+    elif rhythm == "pea": out.append({"name": "ЭМД / PEA (без пульса)", "prob": 0.95})
     elif rhythm == "asystole": out.append({"name": "Асистолия (остановка кровообращения)", "prob": 0.98})
     elif rhythm == "sss": out.append({"name": "СССУ (синусовые паузы)", "prob": 0.9})
     elif rhythm == "wenckebach": out.append({"name": "AV-блокада 2 ст. Мобитц I (Венкебах)", "prob": 0.93})
@@ -1109,6 +1117,8 @@ static func ecg_report(p: Dictionary, sok: Dictionary, axis_lbl: String, res: Di
         line1 = "Ритм: АВ-узловая реципрокная тахикардия (АВУРТ), ЧСС %d — узкие комплексы, P не виден (ретроградный, скрыт в QRS)." % hr
     elif rhythm == "vfib":
         line1 = "Ритм: ФИБРИЛЛЯЦИЯ ЖЕЛУДОЧКОВ — хаотичные волны без QRS. Остановка кровообращения: немедленная дефибрилляция + СЛР."
+    elif rhythm == "pea":
+        line1 = "Ритм: ЭМД/PEA — организованная электрическая активность (медленные широкие комплексы) БЕЗ ПУЛЬСА. СЛР + адреналин, искать обратимые причины (4Г/4Т). НЕ шоковый."
     elif rhythm == "asystole":
         line1 = "Ритм: АСИСТОЛИЯ — отсутствие электрической активности (изолиния). Немедленно СЛР + адреналин. НЕ шоковый ритм."
     elif rhythm == "sss":
@@ -1228,6 +1238,9 @@ static func wellbeing(p: Dictionary, s: Dictionary) -> Dictionary:
     if rhythm == "vfib":
         issues.append("ФИБРИЛЛЯЦИЯ ЖЕЛУДОЧКОВ — остановка, немедленная дефибрилляция")
         sev = maxi(sev, 3)
+    elif rhythm == "pea":
+        issues.append("ЭМД/PEA — нет пульса, СЛР + адреналин (искать причину)")
+        sev = maxi(sev, 3)
     elif rhythm == "asystole":
         issues.append("АСИСТОЛИЯ — клиническая смерть, немедленная СЛР")
         sev = maxi(sev, 3)
@@ -1266,7 +1279,7 @@ static func wellbeing(p: Dictionary, s: Dictionary) -> Dictionary:
         issues.append("тяжёлая гипокалиемия — аритмии")
         sev = maxi(sev, 2)
 
-    if rhythm != "vtach" and rhythm != "vfib" and rhythm != "av3" and rhythm != "torsades" and rhythm != "bidirectional" and rhythm != "avnrt" and rhythm != "asystole" and not rhythm.begins_with("pace"):
+    if rhythm != "vtach" and rhythm != "vfib" and rhythm != "pea" and rhythm != "av3" and rhythm != "torsades" and rhythm != "bidirectional" and rhythm != "avnrt" and rhythm != "asystole" and not rhythm.begins_with("pace"):
         if hr >= 180.0:
             issues.append("крайняя тахикардия")
             sev = maxi(sev, 3)
