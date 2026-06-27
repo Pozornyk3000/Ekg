@@ -129,6 +129,7 @@ var focus_opt: OptionButton
 var pace_fault_opt: OptionButton
 var pvc_opt: OptionButton
 var export_btn: Button
+var monitor_speed_btn: Button
 var prob_label: Label
 var diff_label: Label
 var drug_summary: Label
@@ -308,6 +309,12 @@ func _build_monitor_tab(tabs: TabContainer) -> void:
     monitor.size_flags_horizontal = Control.SIZE_EXPAND_FILL
     monitor.clip_contents = true
     col.add_child(monitor)
+
+    monitor_speed_btn = Button.new()
+    monitor_speed_btn.text = "Скорость развёртки: 25 мм/с"
+    monitor_speed_btn.custom_minimum_size = Vector2(0, 38)
+    monitor_speed_btn.pressed.connect(_toggle_monitor_speed)
+    col.add_child(monitor_speed_btn)
 
     edit_btn = Button.new()
     edit_btn.text = "✏ Редактировать кривую (сетка ЭКГ)"
@@ -1193,6 +1200,12 @@ func _refresh_views() -> void:
     if rate_slider:
         rate_slider.set_value_no_signal(float(params["hr"]))
         rate_label.text = "Частота (ЧСС):  %d уд/мин" % roundi(float(params["hr"]))
+
+func _toggle_monitor_speed() -> void:
+    if not monitor:
+        return
+    monitor.mm_per_s = 50.0 if monitor.mm_per_s < 40.0 else 25.0
+    monitor_speed_btn.text = "Скорость развёртки: %d мм/с" % int(monitor.mm_per_s)
 
 func _refresh_monitor() -> void:
     for j in lead_views.size():

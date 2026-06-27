@@ -1,21 +1,21 @@
 class_name MonitorView
 extends Control
 
-# Бегущий монитор: окно фиксированной длительности проматывается в реальном времени
-# (25 мм/с), как на прикроватном мониторе. Раньше рисовались все 20 с разом — комплексы
-# сливались. Теперь видно ~3-5 с, читаемо.
+# Прикроватный монитор с «стирающей» развёрткой: пишущая головка бежит слева направо,
+# слева от неё — свежая кривая, справа — прошлый проход, на самой головке — разрыв-бланк.
+# Переключаемая скорость 25/50 мм/с.
 
 const PX_PER_MM := 4.6
-const MM_PER_S := 25.0
 const SAMPLES_PER_S := 200.0   # буфер 5 мс/сэмпл
 
 var samples := PackedFloat32Array()
 var lead_name := ""
-var scroll := 0.0
+var mm_per_s := 25.0
+var head := 0.0
 
 func _process(delta: float) -> void:
     if samples.size() > 1:
-        scroll = fposmod(scroll + SAMPLES_PER_S * delta, float(samples.size()))
+        head += SAMPLES_PER_S * delta
         queue_redraw()
 
 func _draw() -> void:
@@ -51,17 +51,29 @@ func _draw() -> void:
 
     var n := samples.size()
     if n > 1:
-        var nshow := mini(n, maxi(2, int(w / sp / MM_PER_S * SAMPLES_PER_S)))
-        var pts := PackedVector2Array()
-        pts.resize(nshow)
-        for i in nshow:
-            var idx := int(fposmod(scroll + i, float(n)))
-            pts[i] = Vector2(i / float(nshow - 1) * w, mid - samples[idx] * PX_PER_MM)
-        draw_polyline(pts, Color(0.25, 1.0, 0.5, 0.16), 6.0, true)   # свечение
-        draw_polyline(pts, Color(0.45, 1.0, 0.58), 2.2, true)        # линия
-        draw_circle(pts[nshow - 1], 4.0, Color(0.8, 1.0, 0.85))      # бегунок
+        var nshow := mini(n, maxi(8, int(w * SAMPLES_PER_S / (sp * mm_per_s))))
+        var col_head := int(head) % nshow
+        var sweep := int(head) / nshow
+        var gap := maxi(4, int(nshow * 0.03))
+        _draw_seg(0, col_head, nshow, sweep, n, w, mid)              # свежий проход (слева)
+        _draw_seg(col_head + gap, nshow - 1, nshow, sweep - 1, n, w, mid)  # прошлый проход (справа)
+        var hx := col_head / float(nshow - 1) * w
+        draw_line(Vector2(hx, 0), Vector2(hx, h), Color(0.7, 1.0, 0.85, 0.45), 2.0)  # курсор-головка
 
     var f := ThemeDB.fallback_font
     draw_rect(Rect2(6, 6, 54, 28), Color(0.0, 0.0, 0.0, 0.45))
     draw_string(f, Vector2(13, 27), lead_name, HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color(0.6, 1.0, 0.72))
-    draw_string(f, Vector2(w - 132, h - 8), "25 мм/с · 10 мм/мВ", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.4, 0.72, 0.5))
+    draw_string(f, Vector2(w - 150, h - 8), "%d мм/с · 10 мм/мВ" % int(mm_per_s), HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.4, 0.72, 0.5))
+
+func _draw_seg(i0: int, i1: int, nshow: int, sweep: int, n: int, w: float, mid: float) -> void:
+    if i1 <= i0:
+        return
+    var pts := PackedVector2Array()
+    for i in range(i0, i1 + 1):
+        var src := sweep * nshow + i
+        var idx := ((src % n) + n) % n
+        pts.append(Vector2(i / float(nshow - 1) * w, mid - samples[idx] * PX_PER_MM))
+    if pts.size() < 2:
+        return
+    draw_polyline(pts, Color(0.25, 1.0, 0.5, 0.16), 6.0, true)
+    draw_polyline(pts, Color(0.45, 1.0, 0.58), 2.2, true)
