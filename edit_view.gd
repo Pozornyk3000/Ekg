@@ -80,7 +80,7 @@ func _draw() -> void:
 
     _draw_labels(w, h)
 
-func _draw_labels(w: float, h: float) -> void:
+func _draw_labels(_w: float, h: float) -> void:
     var f := ThemeDB.fallback_font
     draw_string(f, Vector2(7, 17), lead_name, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(0.10, 0.10, 0.10))
     draw_string(f, Vector2(7, h - 7), "25 мм/с · 10 мм/мВ · клетка 0.04 с / 0.1 мВ · крупная 0.2 с / 0.5 мВ — тяни маркеры",

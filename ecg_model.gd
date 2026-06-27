@@ -761,7 +761,7 @@ static func _render_one(p: Dictionary, lead: int, ev: Dictionary, bs: Dictionary
                 # Форма сегмента ST: выпуклая (STEMI «надгробие») / корытообразная
                 # (дигоксин). Кривизна ∝ уровню ST, поэтому реципрокные отв. зеркалят.
                 if st_shape != 0.0 and absf(pst) > 0.05:
-                    var ph := (tau2 - sp["j"]) / maxf(sp["t_on"] - sp["j"], 1.0)
+                    var ph: float = (tau2 - float(sp["j"])) / maxf(float(sp["t_on"]) - float(sp["j"]), 1.0)
                     v += st_shape * 0.6 * pst * (4.0 * ph * (1.0 - ph)) * pl
             ei += 1
         while s_start < nsp and ts - float(spikes[s_start]) > 14.0:
