@@ -100,6 +100,7 @@ func _draw() -> void:
     if n > 1:
         var nshow := mini(n, maxi(8, int(w * SAMPLES_PER_S / (sp * mm_per_s))))
         var col_head := int(head) % nshow
+        @warning_ignore("integer_division")
         var sweep := int(head) / nshow
         var gap := maxi(4, int(nshow * 0.03))
         _draw_seg(0, col_head, nshow, sweep, n, w, mid)              # свежий проход (слева)

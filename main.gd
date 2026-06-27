@@ -308,10 +308,30 @@ func _ready() -> void:
     _build_stress_tab(tabs)
     _build_quiz_tab(tabs)
 
+    _enable_touch_scroll(tabs)
+
     _built = true
     _recompute()
     _quiz_new()
     _apply_theme(theme_name)
+
+# Плавная прокрутка пальцем на мобильном: ScrollContainer перехватывает протяжку,
+# но дочерние контролы со STOP «съедают» жест. Делаем неинтерактивные элементы
+# (надписи, контейнеры, полоски, монитор, миниатюры) прозрачными для жеста (PASS):
+# нажатие они получают, а если не приняли — протяжка всплывает к ScrollContainer.
+func _enable_touch_scroll(node: Node) -> void:
+    for c in node.get_children():
+        if c is ScrollContainer:
+            var s := c as ScrollContainer
+            s.size_flags_vertical = Control.SIZE_EXPAND_FILL
+            s.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+        elif c is Label or c is ColorRect or c is HSeparator or c is VSeparator \
+                or c is BoxContainer or c is GridContainer or c is MarginContainer \
+                or c is PanelContainer or c is MonitorView or c is LeadView \
+                or c is AxisView or c is StressView:
+            (c as Control).mouse_filter = Control.MOUSE_FILTER_PASS
+        if c.get_child_count() > 0:
+            _enable_touch_scroll(c)
 
 # ---------- оформление (тёмно-синяя тема) ----------
 func _sbflat(bg: Color, radius: int, bw: int = 0, bc: Color = Color(0, 0, 0, 0), pad: int = 12) -> StyleBoxFlat:
@@ -327,17 +347,17 @@ func _sbflat(bg: Color, radius: int, bw: int = 0, bc: Color = Color(0, 0, 0, 0),
     sb.content_margin_bottom = maxi(int(pad * 0.6), 6)
     return sb
 
-func _pal(name: String) -> Dictionary:
-    var raw: Dictionary = PALETTES[name]
+func _pal(pname: String) -> Dictionary:
+    var raw: Dictionary = PALETTES[pname]
     var P := {}
     for k in raw:
         var val = raw[k]
         P[k] = Color(val) if (val is String and val.begins_with("#")) else val
     return P
 
-func _apply_theme(name: String) -> void:
-    theme_name = name
-    var P := _pal(name)
+func _apply_theme(pname: String) -> void:
+    theme_name = pname
+    var P := _pal(pname)
     theme = _build_theme(P)
     if bg_rect: bg_rect.color = P["bg"]
     for mon in [monitor, quiz_monitor]:
@@ -355,7 +375,7 @@ func _apply_theme(name: String) -> void:
     for bar in section_bars:
         if is_instance_valid(bar): bar.color = P["accent"]
     if theme_btn:
-        theme_btn.text = "Тема: " + str(PALETTES[name]["name"])
+        theme_btn.text = "Тема: " + str(PALETTES[pname]["name"])
     _save_settings()
 
 func _cycle_theme() -> void:
@@ -654,9 +674,9 @@ func _build_params_tab(tabs: TabContainer) -> void:
     rs.pressed.connect(_reset_keys.bind(STATE_DEFAULTS, false))
     col.add_child(rs)
 
-func _drug_index(name: String) -> int:
+func _drug_index(dname: String) -> int:
     for i in DRUGS.size():
-        if str(DRUGS[i]["name"]) == name:
+        if str(DRUGS[i]["name"]) == dname:
             return i
     return -1
 
@@ -1382,9 +1402,9 @@ func _drug_rhythm() -> String:
     var found := ""
     for i in DRUGS.size():
         if active_drugs[i] != 2: continue
-        var tr := str(DRUGS[i].get("trhythm", ""))
-        if tr == "vtach": return "vtach"
-        if tr != "" and found == "": found = tr
+        var trv := str(DRUGS[i].get("trhythm", ""))
+        if trv == "vtach": return "vtach"
+        if trv != "" and found == "": found = trv
     return found
 
 func _on_rate(v: float) -> void:

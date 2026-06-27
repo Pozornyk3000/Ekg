@@ -66,7 +66,7 @@ static func _u(v: Vector3) -> Vector3:
     return v.normalized() if v.length() > 0.0001 else v
 
 # ---------- направления сердечного вектора (для обратного пересчёта в UI) ----------
-static func p_dir(p: Dictionary) -> Vector3:
+static func p_dir(_p: Dictionary) -> Vector3:
     var pa := deg_to_rad(60.0)
     return _u(Vector3(cos(pa), sin(pa), 0.10))
 
@@ -457,7 +457,7 @@ static func _activation(block: int, focus: String, qscale: float) -> Dictionary:
     return tt
 
 # Дейкстра с несколькими очагами (бивентрикулярная стимуляция: RV + LV одновременно).
-static func _activation_foci(foci: Array, qscale: float) -> Dictionary:
+static func _activation_foci(foci: Array, _qscale: float) -> Dictionary:
     var segs := _segs()
     var tt := {}
     for s in segs:
