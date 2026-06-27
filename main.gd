@@ -68,6 +68,15 @@ const DRUG_CONV := {
     "Адреналин": ["asystole", "pea"],
     "Атропин": ["sss", "av3", "wenckebach"],
 }
+# Группировка препаратов по классам (для вкладки «Препараты»).
+const DRUG_GROUPS := [
+    ["Класс I — блокаторы Na", ["Хинидин (IA)", "Флекаинид (IC)", "Лидокаин (IB)"]],
+    ["Класс II — β-блокаторы", ["Бета-блокатор"]],
+    ["Класс III — блокаторы K", ["Амиодарон (III)", "Соталол (III)"]],
+    ["Класс IV — блокаторы Ca", ["Верапамил/Дилтиазем"]],
+    ["Неотложные / прочие", ["Дигоксин", "Аденозин", "Атропин", "Адреналин", "Магния сульфат"]],
+    ["Влияющие на электролиты / токсины", ["Спиронолактон", "Фуросемид", "Амитриптилин (ТЦА)"]],
+]
 const DOSE_NAMES := ["Выкл", "Терапевт.", "Токсич."]
 const QUIZ_DIFF_NAMES := ["Все уровни", "Новичок", "Эксперт"]
 const QUIZ_CAT_NAMES := ["Все системы", "Аритмии / ЭКС", "Инфаркт / ишемия", "Блокады проводимости", "Гипертрофия / прочее"]
@@ -441,8 +450,21 @@ func _build_monitor_tab(tabs: TabContainer) -> void:
     _mk_label(col, "Патология (пресет):", 14)
     preset_opt = OptionButton.new()
     preset_opt.custom_minimum_size = Vector2(0, 42)
-    for p in PRESETS:
-        preset_opt.add_item(p["name"])
+    # Группировка по категориям: заголовок-разделитель + пункты; id = индекс в PRESETS.
+    var pgroups := [
+        ["norm", "Норма и варианты"], ["arr", "Аритмии"], ["block", "Блокады и гипертрофия"],
+        ["mi", "Инфаркт / ишемия"], ["synd", "Электролиты и синдромы"], ["pace", "Кардиостимулятор"],
+    ]
+    for g in pgroups:
+        var added := false
+        for pi in PRESETS.size():
+            if _preset_group(PRESETS[pi]) != g[0]: continue
+            if not added:
+                preset_opt.add_separator(str(g[1]))
+                added = true
+            var it := preset_opt.item_count
+            preset_opt.add_item(str(PRESETS[pi]["name"]))
+            preset_opt.set_item_id(it, pi)
     preset_opt.item_selected.connect(_apply_preset)
     col.add_child(preset_opt)
 
@@ -632,6 +654,36 @@ func _build_params_tab(tabs: TabContainer) -> void:
     rs.pressed.connect(_reset_keys.bind(STATE_DEFAULTS, false))
     col.add_child(rs)
 
+func _drug_index(name: String) -> int:
+    for i in DRUGS.size():
+        if str(DRUGS[i]["name"]) == name:
+            return i
+    return -1
+
+func _add_drug_row(col: Node, i: int) -> void:
+    var dr: Dictionary = DRUGS[i]
+    var row := HBoxContainer.new()
+    row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    var nm := Label.new()
+    nm.text = str(dr["name"])
+    nm.add_theme_font_size_override("font_size", 15)
+    nm.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    row.add_child(nm)
+    var ob := OptionButton.new()
+    ob.custom_minimum_size = Vector2(150, 40)
+    for dn in DOSE_NAMES:
+        ob.add_item(dn)
+    ob.item_selected.connect(_on_drug_dose.bind(i))
+    row.add_child(ob)
+    drug_opts[i] = ob
+    col.add_child(row)
+    var dl := Label.new()
+    dl.text = "    " + str(dr["desc"])
+    dl.add_theme_font_size_override("font_size", 12)
+    dl.modulate = Color(0.65, 0.72, 0.8)
+    dl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+    col.add_child(dl)
+
 func _build_drugs_tab(tabs: TabContainer) -> void:
     var sc := ScrollContainer.new()
     sc.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
@@ -643,29 +695,13 @@ func _build_drugs_tab(tabs: TabContainer) -> void:
     sc.add_child(col)
 
     _mk_label(col, "Доза каждого препарата (эффекты суммируются):", 14)
-    for i in DRUGS.size():
-        var dr: Dictionary = DRUGS[i]
-        var row := HBoxContainer.new()
-        row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-        var nm := Label.new()
-        nm.text = str(dr["name"])
-        nm.add_theme_font_size_override("font_size", 15)
-        nm.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-        row.add_child(nm)
-        var ob := OptionButton.new()
-        ob.custom_minimum_size = Vector2(150, 40)
-        for dn in DOSE_NAMES:
-            ob.add_item(dn)
-        ob.item_selected.connect(_on_drug_dose.bind(i))
-        row.add_child(ob)
-        drug_opts.append(ob)
-        col.add_child(row)
-        var dl := Label.new()
-        dl.text = "    " + str(dr["desc"])
-        dl.add_theme_font_size_override("font_size", 12)
-        dl.modulate = Color(0.65, 0.72, 0.8)
-        dl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-        col.add_child(dl)
+    drug_opts.resize(DRUGS.size())
+    for grp in DRUG_GROUPS:
+        _mk_label(col, str(grp[0]), 12)
+        for nm in grp[1]:
+            var i := _drug_index(str(nm))
+            if i >= 0:
+                _add_drug_row(col, i)
 
     var clr := Button.new()
     clr.text = "Очистить все препараты"
@@ -795,8 +831,27 @@ func _reset_keys(defs: Dictionary, is_param: bool) -> void:
     _suspend = false
     _recompute()
 
+func _preset_group(pr: Dictionary) -> String:
+    var n := str(pr["name"])
+    var p: Dictionary = pr["p"]
+    var rh := str(p.get("rhythm", "sinus"))
+    if "нфаркт" in n or "Wellens" in n or "ругада" in n or "ерикардит" in n or "шемия" in n:
+        return "mi"
+    if rh.begins_with("pace") or "ЭКС" in n or "CRT" in n:
+        return "pace"
+    if "калиемия" in n or "кальциемия" in n or "WPW" in n or "P-" in n or "еполяриз" in n:
+        return "synd"
+    if rh != "sinus" or "ахикардия" in n or "радикардия" in n or "СССУ" in n or "Асистол" in n or "ЭМД" in n or "ФЖ" in n:
+        return "arr"
+    if str(p.get("bbb", "none")) != "none" or str(p.get("hemiblock", "none")) != "none" or "локада" in n or "емиблок" in n or "фасцикул" in n or "ГЛЖ" in n or "ГПЖ" in n:
+        return "block"
+    return "norm"
+
 func _apply_preset(idx: int) -> void:
-    var preset: Dictionary = PRESETS[idx]
+    var pid := preset_opt.get_item_id(idx)  # id = индекс в PRESETS (списки сгруппированы)
+    if pid < 0 or pid >= PRESETS.size():
+        return
+    var preset: Dictionary = PRESETS[pid]
     _suspend = true
     for key in DEFAULTS: _set_value(key, DEFAULTS[key], true)
     for key in STATE_DEFAULTS: _set_value(key, STATE_DEFAULTS[key], false)
