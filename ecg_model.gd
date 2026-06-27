@@ -111,6 +111,17 @@ static func _gen_events(p: Dictionary, window: float = WINDOW_MS) -> Dictionary:
             vent.append({"t": taf, "kind": nkind})
             taf += rr * rng.randf_range(0.5, 1.6)
         return {"atrial": [], "vent": vent, "afib": true}
+    elif rhythm == "aflutter":
+        # Трепетание предсердий: предсердия ~300/мин (пилообразные F), желудочки —
+        # проведение N:1 (ratio выводится из ЧСС). QRS узкий, поверх непрерывной пилы.
+        var arate := 300.0
+        var fcycle := 60000.0 / arate  # ~200 мс
+        var ratio := clampi(roundi(arate / clampf(hr, 50.0, 300.0)), 1, 6)
+        var tfl := fcycle * ratio
+        while tfl < window:
+            vent.append({"t": tfl, "kind": nkind})
+            tfl += fcycle * ratio
+        return {"atrial": [], "vent": vent, "afib": false, "flutter": true, "fcycle": fcycle, "ratio": ratio}
     elif rhythm == "vtach":
         var tvt := 0.0
         while tvt < window:
@@ -351,6 +362,10 @@ static func _vg_from_tt(tt: Dictionary) -> Vector3:
 const _V_MUSCLE := 0.045
 const _SPIKE_VEC := Vector3(0.3, -0.85, -0.2)
 const _SPIKE_AMP := 11.0
+# Трепетание: вектор F-волны (кверху → пилообразные отрицательные F в II/III/aVF,
+# положительные в V1, низкие в I) и амплитуда.
+const _FLUTTER_VEC := Vector3(0.1, -1.0, -0.3)
+const _FLUTTER_AMP := 2.6
 const _SEPT := ["sep_ap", "sep_mid", "sep_bas"]
 const _LVFREE := ["lv_lat_ap", "lv_lat_mid", "lv_ant_ap", "lv_ant_mid", "lv_inf_ap", "lv_inf_mid", "lv_post_mid"]
 const _RVFREE := ["rv_ap", "rv_mid", "rv_out"]
@@ -567,6 +582,14 @@ static func _beat_components(p: Dictionary, kind: String) -> Dictionary:
 
     return {"comps": comps, "j": j, "t_on": t_on, "qeff": qeff}
 
+# Пилообразная F-волна трепетания: асимметричный «зуб пилы» без изолинии (медленный
+# подъём ~60% цикла, быстрый спад ~40%), непрерывно — и под QRS-T тоже.
+static func _saw(ts: float, cycle: float) -> float:
+    var ph := fmod(ts, cycle) / cycle
+    if ph < 0.78:
+        return -1.0 + 2.0 * (ph / 0.78)
+    return 1.0 - 2.0 * ((ph - 0.78) / 0.22)
+
 static func _fwave(ts: float, lead: int) -> float:
     var w := 0.4
     if lead == 6: w = 1.0
@@ -630,6 +653,9 @@ static func _render_one(p: Dictionary, lead: int, ev: Dictionary, bs: Dictionary
     var buf := PackedFloat32Array()
     buf.resize(n)
     var afib: bool = ev["afib"]
+    var flutter: bool = ev.get("flutter", false)
+    var fcycle: float = ev.get("fcycle", 200.0)
+    var fl_proj := lv.dot(_FLUTTER_VEC.normalized()) * _FLUTTER_AMP
     var atrial: Array = ev["atrial"]
     var vent: Array = ev["vent"]
     var idx: Array = bs["idx"]
@@ -687,6 +713,8 @@ static func _render_one(p: Dictionary, lead: int, ev: Dictionary, bs: Dictionary
             spi += 1
         if afib:
             v += _fwave(ts, lead)
+        if flutter:
+            v += fl_proj * _saw(ts, fcycle)
         buf[si] = v
     return buf
 
@@ -871,6 +899,7 @@ static func pathology_probabilities(p: Dictionary, s: Dictionary) -> Array:
     var out: Array = []
 
     if rhythm == "afib": out.append({"name": "Фибрилляция предсердий", "prob": 0.96})
+    elif rhythm == "aflutter": out.append({"name": "Трепетание предсердий (волны F)", "prob": 0.95})
     elif rhythm == "vtach": out.append({"name": "Желудочковая тахикардия", "prob": 0.97})
     elif rhythm == "torsades": out.append({"name": "Пируэтная тахикардия (Torsades)", "prob": 0.97})
     elif rhythm == "wenckebach": out.append({"name": "AV-блокада 2 ст. Мобитц I (Венкебах)", "prob": 0.93})
@@ -946,6 +975,9 @@ static func ecg_report(p: Dictionary, sok: Dictionary, axis_lbl: String, res: Di
     var line1 := ""
     if rhythm == "afib":
         line1 = "Ритм: фибрилляция предсердий, ср. ЧСС ~%d, нерегулярный (нет P, волны f)." % hr
+    elif rhythm == "aflutter":
+        var ratio := clampi(roundi(300.0 / maxf(float(p["hr"]), 50.0)), 1, 6)
+        line1 = "Ритм: трепетание предсердий, пилообразные волны F ~300/мин, проведение %d:1, ЧСС жел. ~%d." % [ratio, hr]
     elif rhythm == "vtach":
         line1 = "Ритм: желудочковая тахикардия, ЧСС %d, широкие комплексы без P." % hr
     elif rhythm == "torsades":

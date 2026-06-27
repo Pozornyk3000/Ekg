@@ -16,8 +16,8 @@ const STATE_DEFAULTS := {
     "k": 4.0, "ca": 2.4, "mg": 0.85, "na": 140.0,
     "bp_sys": 120.0, "bp_dia": 80.0,
 }
-const RHYTHM_NAMES := ["Синусовый", "Фибрилляция предсердий", "Желудочковая тахикардия", "Тахикардия пируэт (Torsades)", "AV-блокада 2 ст. Мобитц I (Венкебах)", "AV-блокада 2 ст. Мобитц II", "Полная AV-блокада", "ЭКС желудочковый (VVI)", "ЭКС предсердный (AAI)", "ЭКС двухкамерный (DDD)", "ЭКС бивентрикулярный (BiV/CRT)"]
-const RHYTHM_VALUES := ["sinus", "afib", "vtach", "torsades", "wenckebach", "mobitz2", "av3", "pace_vvi", "pace_aai", "pace_ddd", "pace_biv"]
+const RHYTHM_NAMES := ["Синусовый", "Фибрилляция предсердий", "Трепетание предсердий (волны F)", "Желудочковая тахикардия", "Тахикардия пируэт (Torsades)", "AV-блокада 2 ст. Мобитц I (Венкебах)", "AV-блокада 2 ст. Мобитц II", "Полная AV-блокада", "ЭКС желудочковый (VVI)", "ЭКС предсердный (AAI)", "ЭКС двухкамерный (DDD)", "ЭКС бивентрикулярный (BiV/CRT)"]
+const RHYTHM_VALUES := ["sinus", "afib", "aflutter", "vtach", "torsades", "wenckebach", "mobitz2", "av3", "pace_vvi", "pace_aai", "pace_ddd", "pace_biv"]
 const PACE_FAULT_NAMES := ["ЭКС: норма", "Потеря захвата", "Undersensing (асинхронно)"]
 const PACE_FAULT_VALUES := ["none", "loss_capture", "undersense"]
 const PVC_NAMES := ["Нет", "Редкие", "Частые"]
@@ -67,6 +67,8 @@ const PRESETS := [
     {"name": "Детское сердце", "p": {"rhythm": "sinus", "bbb": "none", "hr": 130.0, "pr": 110.0, "qt": 300.0, "qrs_axis": 100.0, "qrs_dur": 70.0, "r_amp": 10.0}, "s": {}},
     {"name": "Сердце атлета", "p": {"rhythm": "sinus", "bbb": "none", "hr": 48.0, "pr": 205.0, "r_amp": 17.0, "s_amp": 8.0, "qrs_axis": 65.0}, "s": {"bp_sys": 118.0}},
     {"name": "Фибрилляция предсердий", "p": {"rhythm": "afib", "hr": 110.0, "p_amp": 0.0}, "s": {}},
+    {"name": "Трепетание предсердий 2:1", "p": {"rhythm": "aflutter", "hr": 150.0, "p_amp": 0.0}, "s": {}},
+    {"name": "Трепетание предсердий 4:1", "p": {"rhythm": "aflutter", "hr": 75.0, "p_amp": 0.0}, "s": {}},
     {"name": "Гиперкалиемия", "p": {}, "s": {"k": 7.0}},
     {"name": "Гипокалиемия", "p": {}, "s": {"k": 2.5}},
     {"name": "Гипокальциемия (long QT)", "p": {}, "s": {"ca": 1.7}},
@@ -992,6 +994,9 @@ func _recompute() -> void:
     if rhythm == "afib":
         primary_dx = "Фибрилляция предсердий"
         primary_conf = 0.9
+    elif rhythm == "aflutter":
+        primary_dx = "Трепетание предсердий (волны F)"
+        primary_conf = 0.92
     elif rhythm == "vtach":
         primary_dx = "Желудочковая тахикардия"
         primary_conf = 0.95
