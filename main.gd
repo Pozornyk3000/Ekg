@@ -171,6 +171,12 @@ const EXAM_TOTAL := 10
 
 func _ready() -> void:
     set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+    theme = _build_theme()
+    var bg := ColorRect.new()
+    bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+    bg.color = Color("#070e1c")
+    bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+    add_child(bg)
     var margin := MarginContainer.new()
     margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
     for side in ["left", "right", "top", "bottom"]:
@@ -222,6 +228,78 @@ func _ready() -> void:
     _built = true
     _recompute()
     _quiz_new()
+
+# ---------- оформление (тёмно-синяя тема) ----------
+func _sbflat(bg: Color, radius: int, bw: int = 0, bc: Color = Color(0, 0, 0, 0), pad: int = 12) -> StyleBoxFlat:
+    var sb := StyleBoxFlat.new()
+    sb.bg_color = bg
+    sb.set_corner_radius_all(radius)
+    if bw > 0:
+        sb.set_border_width_all(bw)
+        sb.border_color = bc
+    sb.content_margin_left = pad
+    sb.content_margin_right = pad
+    sb.content_margin_top = maxi(int(pad * 0.6), 6)
+    sb.content_margin_bottom = maxi(int(pad * 0.6), 6)
+    return sb
+
+func _build_theme() -> Theme:
+    var PANEL := Color("#0e1830")
+    var PANEL2 := Color("#152444")
+    var HOVER := Color("#1e3461")
+    var ACCENT := Color("#4d9fff")
+    var ACCENT_D := Color("#2a4f8f")
+    var BORDER := Color("#21345e")
+    var TEXT := Color("#dce6f7")
+    var DIM := Color("#8497bd")
+    var DARKTXT := Color("#06112a")
+    var t := Theme.new()
+    t.default_font_size = 15
+
+    t.set_color("font_color", "Label", TEXT)
+
+    var bn := _sbflat(PANEL2, 10, 1, BORDER, 12)
+    var bh := _sbflat(HOVER, 10, 1, ACCENT, 12)
+    var bp := _sbflat(ACCENT, 10, 0, Color(0, 0, 0, 0), 12)
+    var bf := _sbflat(Color(0, 0, 0, 0), 10, 1, ACCENT, 12)
+    var bd := _sbflat(Color("#10182c"), 10, 1, Color("#1a2742"), 12)
+    for ctl in ["Button", "OptionButton"]:
+        t.set_stylebox("normal", ctl, bn)
+        t.set_stylebox("hover", ctl, bh)
+        t.set_stylebox("pressed", ctl, bp)
+        t.set_stylebox("focus", ctl, bf)
+        t.set_stylebox("disabled", ctl, bd)
+        t.set_color("font_color", ctl, TEXT)
+        t.set_color("font_hover_color", ctl, ACCENT)
+        t.set_color("font_pressed_color", ctl, DARKTXT)
+        t.set_color("font_disabled_color", ctl, DIM)
+        t.set_color("font_focus_color", ctl, TEXT)
+
+    t.set_stylebox("panel", "PopupMenu", _sbflat(PANEL, 8, 1, ACCENT_D, 8))
+    t.set_stylebox("hover", "PopupMenu", _sbflat(HOVER, 6, 0, Color(0, 0, 0, 0), 6))
+    t.set_color("font_color", "PopupMenu", TEXT)
+    t.set_color("font_hover_color", "PopupMenu", ACCENT)
+
+    t.set_stylebox("panel", "TabContainer", _sbflat(PANEL, 12, 1, BORDER, 12))
+    t.set_stylebox("tabbar_background", "TabContainer", _sbflat(Color(0, 0, 0, 0), 0))
+    t.set_stylebox("tab_selected", "TabContainer", _sbflat(ACCENT, 8, 0, Color(0, 0, 0, 0), 12))
+    t.set_stylebox("tab_unselected", "TabContainer", _sbflat(PANEL2, 8, 0, Color(0, 0, 0, 0), 12))
+    t.set_stylebox("tab_hovered", "TabContainer", _sbflat(HOVER, 8, 0, Color(0, 0, 0, 0), 12))
+    t.set_color("font_selected_color", "TabContainer", DARKTXT)
+    t.set_color("font_unselected_color", "TabContainer", DIM)
+    t.set_color("font_hovered_color", "TabContainer", ACCENT)
+    t.set_font_size("font_size", "TabContainer", 14)
+
+    t.set_stylebox("slider", "HSlider", _sbflat(Color("#0c1626"), 6))
+    t.set_stylebox("grabber_area", "HSlider", _sbflat(ACCENT_D, 6))
+    t.set_stylebox("grabber_area_highlight", "HSlider", _sbflat(ACCENT, 6))
+
+    t.set_color("font_color", "CheckBox", TEXT)
+    t.set_color("font_hover_color", "CheckBox", ACCENT)
+
+    t.set_stylebox("panel", "Panel", _sbflat(PANEL, 12, 1, BORDER, 10))
+    t.set_stylebox("separator", "HSeparator", _sbflat(BORDER, 0, 0, Color(0, 0, 0, 0), 0))
+    return t
 
 func _build_monitor_tab(tabs: TabContainer) -> void:
     var sc := ScrollContainer.new()

@@ -22,11 +22,11 @@ func _draw() -> void:
     var w := size.x
     var h := size.y
     var mid := h * 0.5
-    draw_rect(Rect2(0, 0, w, h), Color(0.035, 0.06, 0.05))
+    draw_rect(Rect2(0, 0, w, h), Color(0.03, 0.06, 0.12))
 
     var sp := PX_PER_MM
-    var minor := Color(0.22, 0.42, 0.30, 0.30)
-    var major := Color(0.26, 0.58, 0.38, 0.50)
+    var minor := Color(0.20, 0.34, 0.60, 0.26)
+    var major := Color(0.30, 0.50, 0.85, 0.48)
     var x := 0.0
     var k := 0
     while x <= w + 0.5:
@@ -58,12 +58,12 @@ func _draw() -> void:
         _draw_seg(0, col_head, nshow, sweep, n, w, mid)              # свежий проход (слева)
         _draw_seg(col_head + gap, nshow - 1, nshow, sweep - 1, n, w, mid)  # прошлый проход (справа)
         var hx := col_head / float(nshow - 1) * w
-        draw_line(Vector2(hx, 0), Vector2(hx, h), Color(0.7, 1.0, 0.85, 0.45), 2.0)  # курсор-головка
+        draw_line(Vector2(hx, 0), Vector2(hx, h), Color(0.7, 0.9, 1.0, 0.5), 2.0)  # курсор-головка
 
     var f := ThemeDB.fallback_font
     draw_rect(Rect2(6, 6, 54, 28), Color(0.0, 0.0, 0.0, 0.45))
-    draw_string(f, Vector2(13, 27), lead_name, HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color(0.6, 1.0, 0.72))
-    draw_string(f, Vector2(w - 150, h - 8), "%d мм/с · 10 мм/мВ" % int(mm_per_s), HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.4, 0.72, 0.5))
+    draw_string(f, Vector2(13, 27), lead_name, HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color(0.55, 0.85, 1.0))
+    draw_string(f, Vector2(w - 150, h - 8), "%d мм/с · 10 мм/мВ" % int(mm_per_s), HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.45, 0.6, 0.85))
 
 func _draw_seg(i0: int, i1: int, nshow: int, sweep: int, n: int, w: float, mid: float) -> void:
     if i1 <= i0:
@@ -75,5 +75,5 @@ func _draw_seg(i0: int, i1: int, nshow: int, sweep: int, n: int, w: float, mid: 
         pts.append(Vector2(i / float(nshow - 1) * w, mid - samples[idx] * PX_PER_MM))
     if pts.size() < 2:
         return
-    draw_polyline(pts, Color(0.25, 1.0, 0.5, 0.16), 6.0, true)
-    draw_polyline(pts, Color(0.45, 1.0, 0.58), 2.2, true)
+    draw_polyline(pts, Color(0.25, 0.7, 1.0, 0.16), 6.0, true)
+    draw_polyline(pts, Color(0.45, 0.82, 1.0), 2.2, true)
