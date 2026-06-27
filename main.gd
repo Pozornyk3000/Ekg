@@ -130,6 +130,17 @@ var pace_fault_opt: OptionButton
 var pvc_opt: OptionButton
 var export_btn: Button
 var monitor_speed_btn: Button
+var bg_rect: ColorRect
+var theme_btn: Button
+var theme_name := "blue"
+var section_bars: Array = []
+
+const PALETTES := {
+    "blue": {"name": "Синяя", "bg": "#070e1c", "panel": "#0e1830", "panel2": "#152444", "hover": "#1e3461", "accent": "#4d9fff", "accent_d": "#2a4f8f", "border": "#21345e", "text": "#dce6f7", "dim": "#8497bd", "darktxt": "#06112a", "trace": "#73d2ff", "mon_bg": "#03060f", "grid": "#2a4f8f"},
+    "green": {"name": "Зелёная", "bg": "#07140e", "panel": "#0e2018", "panel2": "#143226", "hover": "#1d4a38", "accent": "#2fe089", "accent_d": "#246b4c", "border": "#1f4534", "text": "#dceee7", "dim": "#84a89c", "darktxt": "#05140d", "trace": "#5dffa0", "mon_bg": "#04100a", "grid": "#246b4c"},
+    "light": {"name": "Светлая", "bg": "#e9eef6", "panel": "#ffffff", "panel2": "#eef3fb", "hover": "#dbe6f7", "accent": "#2f6df0", "accent_d": "#9fbcf0", "border": "#cdd9ee", "text": "#16233e", "dim": "#5d6e8e", "darktxt": "#ffffff", "trace": "#4db0ff", "mon_bg": "#081326", "grid": "#2a4f8f"},
+}
+const THEME_ORDER := ["blue", "green", "light"]
 var prob_label: Label
 var diff_label: Label
 var drug_summary: Label
@@ -171,12 +182,12 @@ const EXAM_TOTAL := 10
 
 func _ready() -> void:
     set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-    theme = _build_theme()
-    var bg := ColorRect.new()
-    bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-    bg.color = Color("#070e1c")
-    bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
-    add_child(bg)
+    theme = _build_theme(_pal(theme_name))
+    bg_rect = ColorRect.new()
+    bg_rect.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+    bg_rect.color = Color(PALETTES[theme_name]["bg"])
+    bg_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+    add_child(bg_rect)
     var margin := MarginContainer.new()
     margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
     for side in ["left", "right", "top", "bottom"]:
@@ -228,6 +239,7 @@ func _ready() -> void:
     _built = true
     _recompute()
     _quiz_new()
+    _apply_theme(theme_name)
 
 # ---------- оформление (тёмно-синяя тема) ----------
 func _sbflat(bg: Color, radius: int, bw: int = 0, bc: Color = Color(0, 0, 0, 0), pad: int = 12) -> StyleBoxFlat:
@@ -243,16 +255,49 @@ func _sbflat(bg: Color, radius: int, bw: int = 0, bc: Color = Color(0, 0, 0, 0),
     sb.content_margin_bottom = maxi(int(pad * 0.6), 6)
     return sb
 
-func _build_theme() -> Theme:
-    var PANEL := Color("#0e1830")
-    var PANEL2 := Color("#152444")
-    var HOVER := Color("#1e3461")
-    var ACCENT := Color("#4d9fff")
-    var ACCENT_D := Color("#2a4f8f")
-    var BORDER := Color("#21345e")
-    var TEXT := Color("#dce6f7")
-    var DIM := Color("#8497bd")
-    var DARKTXT := Color("#06112a")
+func _pal(name: String) -> Dictionary:
+    var raw: Dictionary = PALETTES[name]
+    var P := {}
+    for k in raw:
+        var val = raw[k]
+        P[k] = Color(val) if (val is String and val.begins_with("#")) else val
+    return P
+
+func _apply_theme(name: String) -> void:
+    theme_name = name
+    var P := _pal(name)
+    theme = _build_theme(P)
+    if bg_rect: bg_rect.color = P["bg"]
+    if monitor:
+        monitor.bg_c = P["mon_bg"]
+        monitor.trace_color = P["trace"]
+        monitor.grid_c = P["grid"]
+        monitor.queue_redraw()
+    for arr in [lead_views, quiz_lead_views]:
+        for lv in arr:
+            lv.bg_c = P["mon_bg"]
+            lv.trace_color = P["trace"]
+            lv.grid_c = P["grid"]
+            lv.queue_redraw()
+    for bar in section_bars:
+        if is_instance_valid(bar): bar.color = P["accent"]
+    if theme_btn:
+        theme_btn.text = "Тема: " + str(PALETTES[name]["name"])
+
+func _cycle_theme() -> void:
+    var i := THEME_ORDER.find(theme_name)
+    _apply_theme(THEME_ORDER[(i + 1) % THEME_ORDER.size()])
+
+func _build_theme(P: Dictionary) -> Theme:
+    var PANEL: Color = P["panel"]
+    var PANEL2: Color = P["panel2"]
+    var HOVER: Color = P["hover"]
+    var ACCENT: Color = P["accent"]
+    var ACCENT_D: Color = P["accent_d"]
+    var BORDER: Color = P["border"]
+    var TEXT: Color = P["text"]
+    var DIM: Color = P["dim"]
+    var DARKTXT: Color = P["darktxt"]
     var t := Theme.new()
     t.default_font_size = 15
 
@@ -299,6 +344,23 @@ func _build_theme() -> Theme:
 
     t.set_stylebox("panel", "Panel", _sbflat(PANEL, 12, 1, BORDER, 10))
     t.set_stylebox("separator", "HSeparator", _sbflat(BORDER, 0, 0, Color(0, 0, 0, 0), 0))
+
+    # Скроллбары
+    var track := _sbflat(P["bg"], 6, 0, Color(0, 0, 0, 0), 0)
+    var grab := _sbflat(ACCENT_D, 6, 0, Color(0, 0, 0, 0), 0)
+    var grab_h := _sbflat(ACCENT, 6, 0, Color(0, 0, 0, 0), 0)
+    for sbn in ["VScrollBar", "HScrollBar"]:
+        t.set_stylebox("scroll", sbn, track)
+        t.set_stylebox("grabber", sbn, grab)
+        t.set_stylebox("grabber_highlight", sbn, grab_h)
+        t.set_stylebox("grabber_pressed", sbn, grab_h)
+
+    # CheckBox / CheckButton — фон-«пилюля» (галочки-иконки остаются дефолтными)
+    t.set_color("font_color", "CheckButton", TEXT)
+    t.set_color("font_hover_color", "CheckButton", ACCENT)
+    t.set_stylebox("normal", "CheckBox", _sbflat(Color(0, 0, 0, 0), 8, 0, Color(0, 0, 0, 0), 6))
+    t.set_stylebox("hover", "CheckBox", _sbflat(HOVER, 8, 0, Color(0, 0, 0, 0), 6))
+    t.set_stylebox("pressed", "CheckBox", _sbflat(HOVER, 8, 0, Color(0, 0, 0, 0), 6))
     return t
 
 func _build_monitor_tab(tabs: TabContainer) -> void:
@@ -388,11 +450,22 @@ func _build_monitor_tab(tabs: TabContainer) -> void:
     monitor.clip_contents = true
     col.add_child(monitor)
 
+    var ctlrow := HBoxContainer.new()
+    ctlrow.add_theme_constant_override("separation", 8)
+    ctlrow.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    col.add_child(ctlrow)
     monitor_speed_btn = Button.new()
-    monitor_speed_btn.text = "Скорость развёртки: 25 мм/с"
+    monitor_speed_btn.text = "Скорость: 25 мм/с"
     monitor_speed_btn.custom_minimum_size = Vector2(0, 38)
+    monitor_speed_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
     monitor_speed_btn.pressed.connect(_toggle_monitor_speed)
-    col.add_child(monitor_speed_btn)
+    ctlrow.add_child(monitor_speed_btn)
+    theme_btn = Button.new()
+    theme_btn.text = "Тема: Синяя"
+    theme_btn.custom_minimum_size = Vector2(0, 38)
+    theme_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    theme_btn.pressed.connect(_cycle_theme)
+    ctlrow.add_child(theme_btn)
 
     edit_btn = Button.new()
     edit_btn.text = "✏ Редактировать кривую (сетка ЭКГ)"
@@ -556,11 +629,22 @@ func _build_analysis_tab(tabs: TabContainer) -> void:
     col.add_child(analysis_label)
 
 func _mk_label(parent: Node, text: String, fs: int) -> void:
+    var hb := HBoxContainer.new()
+    hb.add_theme_constant_override("separation", 7)
+    hb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    var bar := ColorRect.new()
+    bar.custom_minimum_size = Vector2(3, fs + 4)
+    bar.color = Color(PALETTES[theme_name]["accent"])
+    bar.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+    section_bars.append(bar)
+    hb.add_child(bar)
     var l := Label.new()
     l.add_theme_font_size_override("font_size", fs)
     l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
     l.text = text
-    parent.add_child(l)
+    l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    hb.add_child(l)
+    parent.add_child(hb)
 
 func _add_artifact_check(parent: Node, title: String, key: String, on_value: float, default_on: bool) -> void:
     var cb := CheckBox.new()
@@ -1283,7 +1367,7 @@ func _toggle_monitor_speed() -> void:
     if not monitor:
         return
     monitor.mm_per_s = 50.0 if monitor.mm_per_s < 40.0 else 25.0
-    monitor_speed_btn.text = "Скорость развёртки: %d мм/с" % int(monitor.mm_per_s)
+    monitor_speed_btn.text = "Скорость: %d мм/с" % int(monitor.mm_per_s)
 
 func _refresh_monitor() -> void:
     for j in lead_views.size():

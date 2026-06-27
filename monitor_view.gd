@@ -12,6 +12,9 @@ var samples := PackedFloat32Array()
 var lead_name := ""
 var mm_per_s := 25.0
 var head := 0.0
+var bg_c := Color(0.03, 0.06, 0.12)
+var trace_color := Color(0.45, 0.82, 1.0)
+var grid_c := Color(0.30, 0.50, 0.85)
 
 func _process(delta: float) -> void:
     if samples.size() > 1:
@@ -22,11 +25,11 @@ func _draw() -> void:
     var w := size.x
     var h := size.y
     var mid := h * 0.5
-    draw_rect(Rect2(0, 0, w, h), Color(0.03, 0.06, 0.12))
+    draw_rect(Rect2(0, 0, w, h), bg_c)
 
     var sp := PX_PER_MM
-    var minor := Color(0.20, 0.34, 0.60, 0.26)
-    var major := Color(0.30, 0.50, 0.85, 0.48)
+    var minor := Color(grid_c, 0.26)
+    var major := Color(grid_c, 0.5)
     var x := 0.0
     var k := 0
     while x <= w + 0.5:
@@ -75,5 +78,5 @@ func _draw_seg(i0: int, i1: int, nshow: int, sweep: int, n: int, w: float, mid: 
         pts.append(Vector2(i / float(nshow - 1) * w, mid - samples[idx] * PX_PER_MM))
     if pts.size() < 2:
         return
-    draw_polyline(pts, Color(0.25, 0.7, 1.0, 0.16), 6.0, true)
-    draw_polyline(pts, Color(0.45, 0.82, 1.0), 2.2, true)
+    draw_polyline(pts, Color(trace_color, 0.16), 6.0, true)
+    draw_polyline(pts, trace_color, 2.2, true)
