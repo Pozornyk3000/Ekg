@@ -179,6 +179,7 @@ var exam_active := false
 var exam_q := 0
 var exam_score := 0
 var exam_misses: Array = []
+var exam_best := 0
 const EXAM_TOTAL := 10
 
 const SETTINGS_PATH := "user://settings.cfg"
@@ -190,11 +191,17 @@ func _load_settings() -> void:
     var saved := str(cfg.get_value("ui", "theme", theme_name))
     if PALETTES.has(saved):
         theme_name = saved
+    quiz_correct = int(cfg.get_value("quiz", "correct", 0))
+    quiz_total = int(cfg.get_value("quiz", "total", 0))
+    exam_best = int(cfg.get_value("quiz", "best_exam", 0))
 
 func _save_settings() -> void:
     var cfg := ConfigFile.new()
     cfg.load(SETTINGS_PATH)  # сохранить прочие ключи, если есть
     cfg.set_value("ui", "theme", theme_name)
+    cfg.set_value("quiz", "correct", quiz_correct)
+    cfg.set_value("quiz", "total", quiz_total)
+    cfg.set_value("quiz", "best_exam", exam_best)
     cfg.save(SETTINGS_PATH)
 
 func _ready() -> void:
@@ -856,21 +863,24 @@ func _quiz_next() -> void:
 func _exam_finish() -> void:
     exam_active = false
     var pct := roundi(float(exam_score) / float(EXAM_TOTAL) * 100.0)
+    var record := pct > exam_best
+    if record: exam_best = pct
     var verdict := "нужна практика"
     if pct >= 90: verdict = "отлично"
     elif pct >= 70: verdict = "хорошо"
     elif pct >= 50: verdict = "удовлетворительно"
-    quiz_feedback.text = "📊 Экзамен завершён: %d / %d (%d%%) — %s" % [exam_score, EXAM_TOTAL, pct, verdict]
+    quiz_feedback.text = "📊 Экзамен: %d / %d (%d%%) — %s%s" % [exam_score, EXAM_TOTAL, pct, verdict, "  🏆 рекорд!" if record else ""]
     quiz_feedback.add_theme_color_override("font_color",
         Color(0.3, 1.0, 0.45) if pct >= 70 else (Color(0.95, 0.85, 0.2) if pct >= 50 else Color(1.0, 0.4, 0.3)))
     if exam_misses.is_empty():
         quiz_explain.text = "Без ошибок — отличная работа!"
     else:
         quiz_explain.text = "Ошибки (повтори): " + ", ".join(PackedStringArray(exam_misses))
-    quiz_score_label.text = "Счёт за сессию: %d / %d" % [quiz_correct, quiz_total]
+    quiz_score_label.text = "Счёт: %d / %d   ·   Лучший экзамен: %d%%" % [quiz_correct, quiz_total, exam_best]
     for b in quiz_answer_btns:
         b.disabled = true
     quiz_next_btn.text = "▶ Новый вопрос"
+    _save_settings()
 
 func _quiz_category(pr: Dictionary) -> String:
     var p: Dictionary = pr["p"]
@@ -974,6 +984,7 @@ func _quiz_new() -> void:
         lv.samples = bufs[i]
         lv.queue_redraw()
     if quiz_monitor:
+        quiz_monitor.hr_bpm = float(eff.get("hr", 0.0))
         quiz_monitor.samples = ECGModel.generate_monitor(eff, 1, 20000.0, 4000)
         quiz_monitor.queue_redraw()
     quiz_explain_text = _quiz_report(eff, gen)
@@ -988,7 +999,7 @@ func _quiz_new() -> void:
     else:
         quiz_next_btn.text = "▶ Следующий вопрос"
         quiz_next_btn.disabled = false
-        quiz_score_label.text = "Счёт: %d / %d" % [quiz_correct, quiz_total]
+        quiz_score_label.text = "Счёт: %d / %d   ·   Лучший экзамен: %d%%" % [quiz_correct, quiz_total, exam_best]
 
 func _quiz_answer(i: int) -> void:
     if quiz_answered or quiz_answer_idx < 0:
@@ -1014,7 +1025,8 @@ func _quiz_answer(i: int) -> void:
         quiz_next_btn.text = "📊 Показать результат" if exam_q >= EXAM_TOTAL else "▶ Далее (%d/%d)" % [exam_q, EXAM_TOTAL]
         quiz_score_label.text = "🎓 Экзамен — вопрос %d/%d   (верно: %d)" % [exam_q, EXAM_TOTAL, exam_score]
     else:
-        quiz_score_label.text = "Счёт: %d / %d" % [quiz_correct, quiz_total]
+        quiz_score_label.text = "Счёт: %d / %d   ·   Лучший экзамен: %d%%" % [quiz_correct, quiz_total, exam_best]
+    _save_settings()
 
 func _build_stress_tab(tabs: TabContainer) -> void:
     var sc := ScrollContainer.new()
@@ -1405,6 +1417,7 @@ func _refresh_monitor() -> void:
         lvj.highlighted = (j == selected_lead)
         lvj.queue_redraw()
     if _last_eff.is_empty(): return
+    monitor.hr_bpm = float(_last_eff.get("hr", 0.0))
     monitor.samples = ECGModel.generate_monitor(_last_eff, selected_lead, 20000.0, 4000)
     monitor.lead_name = LEADS[selected_lead]
     monitor.queue_redraw()

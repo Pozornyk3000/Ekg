@@ -15,6 +15,7 @@ var head := 0.0
 var bg_c := Color(0.03, 0.06, 0.12)
 var trace_color := Color(0.45, 0.82, 1.0)
 var grid_c := Color(0.30, 0.50, 0.85)
+var hr_bpm := 0.0
 
 func _process(delta: float) -> void:
     if samples.size() > 1:
@@ -67,6 +68,11 @@ func _draw() -> void:
     draw_rect(Rect2(6, 6, 54, 28), Color(0.0, 0.0, 0.0, 0.45))
     draw_string(f, Vector2(13, 27), lead_name, HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color(0.55, 0.85, 1.0))
     draw_string(f, Vector2(w - 150, h - 8), "%d мм/с · 10 мм/мВ" % int(mm_per_s), HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.45, 0.6, 0.85))
+    if hr_bpm > 0.0:
+        var hb := "%d" % int(round(hr_bpm))
+        var fw := f.get_string_size(hb, HORIZONTAL_ALIGNMENT_LEFT, -1, 34).x
+        draw_string(f, Vector2(w - fw - 14, 36), hb, HORIZONTAL_ALIGNMENT_LEFT, -1, 34, Color(0.45, 1.0, 0.55))
+        draw_string(f, Vector2(w - 70, 52), "уд/мин", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.4, 0.7, 0.5))
 
 func _draw_seg(i0: int, i1: int, nshow: int, sweep: int, n: int, w: float, mid: float) -> void:
     if i1 <= i0:
