@@ -58,6 +58,7 @@ const PRESETS := [
     {"name": "Инфаркт задний (зеркало V1-V2)", "p": {"st_z": 2.6, "q_amp": 3.2}, "s": {}},
     {"name": "Гемиблок передней ветви (ЛПВ/LAFB)", "p": {"hemiblock": "lafb", "qrs_axis": -60.0, "qrs_dur": 100.0}, "s": {}},
     {"name": "Гемиблок задней ветви (ЛЗВ/LPFB)", "p": {"hemiblock": "lpfb", "qrs_axis": 120.0, "qrs_dur": 100.0}, "s": {}},
+    {"name": "Бифасцикулярная блокада (ПНПГ + ЛПВ)", "p": {"bbb": "rbbb", "hemiblock": "lafb", "qrs_axis": -35.0, "qrs_dur": 140.0}, "s": {}},
     {"name": "Блокада ЛНПГ", "p": {"bbb": "lbbb", "qrs_dur": 150.0, "qrs_axis": -30.0}, "s": {}},
     {"name": "Блокада ПНПГ", "p": {"bbb": "rbbb", "qrs_dur": 140.0}, "s": {}},
     {"name": "AV-блокада 1 ст.", "p": {"pr": 280.0}, "s": {}},

@@ -485,12 +485,15 @@ static func _beat_components(p: Dictionary, kind: String) -> Dictionary:
     var samp := float(p["q_amp"]) * 1.2
     if block == 0 or focus.begins_with("lv") or biv: samp *= -0.2
     var hemi := str(p.get("hemiblock", "none"))
-    if hemi == "lafb" and kind == "n":
+    # Гемиблок задаёт начальный вектор ЛЖ; комбинируется с ПНПГ (бифасцикулярная блокада:
+    # ЛЖ через одну ветвь + поздний ПЖ от ПНПГ). С ПЛНПГ не сочетается (ЛЖ — сам блок).
+    var hemi_ok := kind == "n" or kind == "rbbb"
+    if hemi == "lafb" and hemi_ok:
         # Блокада передней ветви ЛНПГ: первой активируется задняя ветвь → начальный
         # вектор книзу-вправо (r в II/III/aVF, q в I/aVL), главный вектор кверху-влево
         # (резкая левая ось задаётся qrs_axis).
         comps.append({"v": _u(Vector3(-0.2, 0.65, -0.2)) * (absf(samp) * 1.4 + 1.0), "c": s_mid, "s": 8.0})
-    elif hemi == "lpfb" and kind == "n":
+    elif hemi == "lpfb" and hemi_ok:
         # Блокада задней ветви ЛНПГ: первой активируется передняя ветвь → начальный
         # вектор кверху-влево (r в I/aVL, q в II/III/aVF), главный вектор книзу-вправо.
         comps.append({"v": _u(Vector3(0.35, -0.6, 0.0)) * (absf(samp) * 1.4 + 1.0), "c": s_mid, "s": 8.0})
@@ -936,10 +939,13 @@ static func pathology_probabilities(p: Dictionary, s: Dictionary) -> Array:
     if float(p.get("strain", 0.0)) > 0.0:
         out.append({"name": "Гипертрофия с перегрузкой (strain)", "prob": 0.82})
     var hemi := str(p.get("hemiblock", "none"))
+    var is_rbbb := str(p.get("bbb", "none")) == "rbbb"
     if hemi == "lafb":
-        out.append({"name": "Блокада передней ветви ЛНПГ (ЛПВ)", "prob": 0.85})
+        if is_rbbb: out.append({"name": "Бифасцикулярная блокада (ПНПГ + ЛПВ)", "prob": 0.9})
+        else: out.append({"name": "Блокада передней ветви ЛНПГ (ЛПВ)", "prob": 0.85})
     elif hemi == "lpfb":
-        out.append({"name": "Блокада задней ветви ЛНПГ (ЛЗВ)", "prob": 0.8})
+        if is_rbbb: out.append({"name": "Бифасцикулярная блокада (ПНПГ + ЛЗВ)", "prob": 0.88})
+        else: out.append({"name": "Блокада задней ветви ЛНПГ (ЛЗВ)", "prob": 0.8})
 
     # Центры сигмоид = клинические пороги THR (50% уверенности на пороге);
     # ворота (gate) — порог минус запас, чтобы пограничные случаи попадали в дифференциал.
