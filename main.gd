@@ -139,6 +139,18 @@ var stress_stage_slider: HSlider
 var stress_run_btn: Button
 var stress_timer: Timer
 var stress_running := false
+var quiz_lead_views: Array = []
+var quiz_answer_btns: Array = []
+var quiz_options: Array = []
+var quiz_answer_idx := -1
+var quiz_answered := false
+var quiz_correct := 0
+var quiz_total := 0
+var quiz_explain_text := ""
+var quiz_feedback: Label
+var quiz_explain: Label
+var quiz_score_label: Label
+var quiz_next_btn: Button
 
 func _ready() -> void:
     set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -188,9 +200,11 @@ func _ready() -> void:
     _build_drugs_tab(tabs)
     _build_analysis_tab(tabs)
     _build_stress_tab(tabs)
+    _build_quiz_tab(tabs)
 
     _built = true
     _recompute()
+    _quiz_new()
 
 func _build_monitor_tab(tabs: TabContainer) -> void:
     var sc := ScrollContainer.new()
@@ -527,6 +541,150 @@ func _apply_preset(idx: int) -> void:
     for key in preset["s"]: _set_value(key, preset["s"][key], false)
     _suspend = false
     _recompute()
+
+# ---------- Викторина «угадай диагноз» ----------
+func _build_quiz_tab(tabs: TabContainer) -> void:
+    var sc := ScrollContainer.new()
+    sc.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+    tabs.add_child(sc)
+    tabs.set_tab_title(5, "Викторина")
+    var col := VBoxContainer.new()
+    col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    col.add_theme_constant_override("separation", 8)
+    sc.add_child(col)
+
+    quiz_score_label = Label.new()
+    quiz_score_label.add_theme_font_size_override("font_size", 16)
+    col.add_child(quiz_score_label)
+
+    _mk_label(col, "Определите диагноз по ЭКГ:", 15)
+    var grid := GridContainer.new()
+    grid.columns = 3
+    grid.add_theme_constant_override("h_separation", 6)
+    grid.add_theme_constant_override("v_separation", 6)
+    grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    col.add_child(grid)
+    for i in LEADS.size():
+        var lv := LeadView.new()
+        lv.lead_name = LEADS[i]
+        lv.custom_minimum_size = Vector2(0, 58)
+        lv.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+        lv.clip_contents = true
+        grid.add_child(lv)
+        quiz_lead_views.append(lv)
+
+    _mk_label(col, "Варианты ответа:", 14)
+    for i in 4:
+        var b := Button.new()
+        b.custom_minimum_size = Vector2(0, 46)
+        b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+        b.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+        b.pressed.connect(_quiz_answer.bind(i))
+        col.add_child(b)
+        quiz_answer_btns.append(b)
+
+    quiz_feedback = Label.new()
+    quiz_feedback.add_theme_font_size_override("font_size", 16)
+    quiz_feedback.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+    col.add_child(quiz_feedback)
+
+    quiz_explain = Label.new()
+    quiz_explain.add_theme_font_size_override("font_size", 14)
+    quiz_explain.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+    col.add_child(quiz_explain)
+
+    quiz_next_btn = Button.new()
+    quiz_next_btn.text = "▶ Новый вопрос"
+    quiz_next_btn.custom_minimum_size = Vector2(0, 46)
+    quiz_next_btn.pressed.connect(_quiz_new)
+    col.add_child(quiz_next_btn)
+
+func _quiz_build_eff(preset: Dictionary) -> Dictionary:
+    # Считаем ЭКГ загадки в изоляции, не трогая глобальные параметры (не палим ответ).
+    var sp := params
+    var ss := state
+    var sd := active_drugs
+    params = DEFAULTS.duplicate(true)
+    for key in preset["p"]: params[key] = preset["p"][key]
+    state = STATE_DEFAULTS.duplicate(true)
+    for key in preset["s"]: state[key] = preset["s"][key]
+    active_drugs = []
+    for _i in DRUGS.size(): active_drugs.append(0)
+    var eff := _effective_params()
+    params = sp
+    state = ss
+    active_drugs = sd
+    return eff
+
+func _quiz_report(eff: Dictionary, gen: Dictionary) -> String:
+    var bufs: Array = gen["buffers"]
+    var ev: Dictionary = gen["ev"]
+    var spm := ECGModel.M / ECGModel.WINDOW_MS
+    var vent: Array = ev["vent"]
+    var fv := float(vent[0]["t"]) if not vent.is_empty() else 0.0
+    var qd := maxf(float(gen["qeff"]), 140.0)
+    var lo := maxi(0, int((fv - 20.0) * spm))
+    var hi := int((fv + qd + 40.0) * spm)
+    var rs: Array = []
+    for b in bufs: rs.append(ECGModel.measure_rs(b, lo, hi))
+    var res := ECGModel.classify(eff)
+    var sok := ECGModel.sokolow(rs)
+    var net_i: float = rs[0].x - rs[0].y
+    var net_avf: float = rs[5].x - rs[5].y
+    var axis := float(eff["qrs_axis"])
+    if absf(net_i) > 0.05 or absf(net_avf) > 0.05:
+        axis = rad_to_deg(atan2(net_avf, net_i))
+    return ECGModel.ecg_report(eff, sok, ECGModel.axis_label(axis), res)
+
+func _quiz_new() -> void:
+    if quiz_lead_views.size() < 12:
+        return
+    quiz_answered = false
+    var n := PRESETS.size()
+    var correct := randi() % n
+    quiz_options = [correct]
+    while quiz_options.size() < 4:
+        var d := randi() % n
+        if not (d in quiz_options): quiz_options.append(d)
+    quiz_options.shuffle()
+    quiz_answer_idx = quiz_options.find(correct)
+    for i in 4:
+        var b: Button = quiz_answer_btns[i]
+        b.text = str(PRESETS[quiz_options[i]]["name"])
+        b.disabled = false
+        b.remove_theme_color_override("font_color")
+    var eff := _quiz_build_eff(PRESETS[correct])
+    var gen := ECGModel.generate_all(eff)
+    eff["qrs_eff"] = float(gen["qeff"])
+    var bufs: Array = gen["buffers"]
+    for i in quiz_lead_views.size():
+        var lv: LeadView = quiz_lead_views[i]
+        lv.samples = bufs[i]
+        lv.queue_redraw()
+    quiz_explain_text = _quiz_report(eff, gen)
+    quiz_feedback.text = ""
+    quiz_explain.text = ""
+    quiz_next_btn.text = "▶ Следующий вопрос"
+    quiz_score_label.text = "Счёт: %d / %d" % [quiz_correct, quiz_total]
+
+func _quiz_answer(i: int) -> void:
+    if quiz_answered or quiz_answer_idx < 0:
+        return
+    quiz_answered = true
+    quiz_total += 1
+    var ok := i == quiz_answer_idx
+    if ok: quiz_correct += 1
+    for j in 4:
+        var b: Button = quiz_answer_btns[j]
+        b.disabled = true
+        if j == quiz_answer_idx:
+            b.add_theme_color_override("font_color", Color(0.3, 1.0, 0.45))
+        elif j == i:
+            b.add_theme_color_override("font_color", Color(1.0, 0.35, 0.3))
+    quiz_feedback.text = "✓ Верно!" if ok else "✗ Неверно. Правильно: " + str(quiz_answer_btns[quiz_answer_idx].text)
+    quiz_feedback.add_theme_color_override("font_color", Color(0.3, 1.0, 0.45) if ok else Color(1.0, 0.4, 0.3))
+    quiz_explain.text = quiz_explain_text
+    quiz_score_label.text = "Счёт: %d / %d" % [quiz_correct, quiz_total]
 
 func _build_stress_tab(tabs: TabContainer) -> void:
     var sc := ScrollContainer.new()
