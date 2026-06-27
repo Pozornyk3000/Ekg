@@ -11,6 +11,7 @@ const DEFAULTS := {
     "resp_arr": 0.06, "baseline_wander": 0.0, "mains_noise": 0.0,
     "st_shape": 0.0, "p_morph": "normal",
     "delta_amp": 0.0, "j_wave": 0.0, "t_post": 0.0, "pr_dep": 0.0, "strain": 0.0, "rv_boost": 0.0,
+    "hemiblock": "none",
 }
 const STATE_DEFAULTS := {
     "k": 4.0, "ca": 2.4, "mg": 0.85, "na": 140.0,
@@ -55,6 +56,8 @@ const PRESETS := [
     {"name": "ГЛЖ с перегрузкой (strain)", "p": {"r_amp": 32.0, "s_amp": 18.0, "qrs_axis": -15.0, "strain": 4.5}, "s": {"bp_sys": 195.0}},
     {"name": "ГПЖ с перегрузкой (strain)", "p": {"r_amp": 9.0, "s_amp": 14.0, "qrs_axis": 120.0, "strain": 3.5, "rv_boost": 3.2}, "s": {}},
     {"name": "Инфаркт задний (зеркало V1-V2)", "p": {"st_z": 2.6, "q_amp": 3.2}, "s": {}},
+    {"name": "Гемиблок передней ветви (ЛПВ/LAFB)", "p": {"hemiblock": "lafb", "qrs_axis": -60.0, "qrs_dur": 100.0}, "s": {}},
+    {"name": "Гемиблок задней ветви (ЛЗВ/LPFB)", "p": {"hemiblock": "lpfb", "qrs_axis": 120.0, "qrs_dur": 100.0}, "s": {}},
     {"name": "Блокада ЛНПГ", "p": {"bbb": "lbbb", "qrs_dur": 150.0, "qrs_axis": -30.0}, "s": {}},
     {"name": "Блокада ПНПГ", "p": {"bbb": "rbbb", "qrs_dur": 140.0}, "s": {}},
     {"name": "AV-блокада 1 ст.", "p": {"pr": 280.0}, "s": {}},

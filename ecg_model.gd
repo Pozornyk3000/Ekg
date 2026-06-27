@@ -484,7 +484,18 @@ static func _beat_components(p: Dictionary, kind: String) -> Dictionary:
     var comps: Array = []
     var samp := float(p["q_amp"]) * 1.2
     if block == 0 or focus.begins_with("lv") or biv: samp *= -0.2
-    comps.append({"v": _u(Vector3(-0.55, -0.20, -0.45)) * samp, "c": s_mid, "s": 7.0})
+    var hemi := str(p.get("hemiblock", "none"))
+    if hemi == "lafb" and kind == "n":
+        # Блокада передней ветви ЛНПГ: первой активируется задняя ветвь → начальный
+        # вектор книзу-вправо (r в II/III/aVF, q в I/aVL), главный вектор кверху-влево
+        # (резкая левая ось задаётся qrs_axis).
+        comps.append({"v": _u(Vector3(-0.2, 0.65, -0.2)) * (absf(samp) * 1.4 + 1.0), "c": s_mid, "s": 8.0})
+    elif hemi == "lpfb" and kind == "n":
+        # Блокада задней ветви ЛНПГ: первой активируется передняя ветвь → начальный
+        # вектор кверху-влево (r в I/aVL, q в II/III/aVF), главный вектор книзу-вправо.
+        comps.append({"v": _u(Vector3(0.35, -0.6, 0.0)) * (absf(samp) * 1.4 + 1.0), "c": s_mid, "s": 8.0})
+    else:
+        comps.append({"v": _u(Vector3(-0.55, -0.20, -0.45)) * samp, "c": s_mid, "s": 7.0})
 
     # Патологический Q инфаркта: вектор некроза направлен ОТ зоны повреждения
     # (против ST-вектора) → Q появляется в тех же отведениях, что и подъём ST,
@@ -924,6 +935,11 @@ static func pathology_probabilities(p: Dictionary, s: Dictionary) -> Array:
             out.append({"name": "Синдром Wellens (стеноз ПМЖВ)", "prob": 0.85})
     if float(p.get("strain", 0.0)) > 0.0:
         out.append({"name": "Гипертрофия с перегрузкой (strain)", "prob": 0.82})
+    var hemi := str(p.get("hemiblock", "none"))
+    if hemi == "lafb":
+        out.append({"name": "Блокада передней ветви ЛНПГ (ЛПВ)", "prob": 0.85})
+    elif hemi == "lpfb":
+        out.append({"name": "Блокада задней ветви ЛНПГ (ЛЗВ)", "prob": 0.8})
 
     # Центры сигмоид = клинические пороги THR (50% уверенности на пороге);
     # ворота (gate) — порог минус запас, чтобы пограничные случаи попадали в дифференциал.
