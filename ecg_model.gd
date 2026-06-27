@@ -809,6 +809,19 @@ static func generate_transition(pb: Dictionary, pa: Dictionary, lead: int, total
         out[i] = b[i] if i < sw else a[i]
     return out
 
+# Лента дефибрилляции/кардиоверсии: аритмия → артефакт разряда (большой спайк +
+# постразрядное «молчание») → синус.
+static func generate_defib(pb: Dictionary, pa: Dictionary, lead: int, total_ms: float, n: int, shock_ms: float) -> PackedFloat32Array:
+    var out := generate_transition(pb, pa, lead, total_ms, n, shock_ms)
+    var si := clampi(int(shock_ms / total_ms * n), 1, n - 8)
+    for k in range(0, 6):
+        if si + k < n:
+            out[si + k] = 45.0 if k % 2 == 0 else -45.0  # биполярный спайк разряда
+    for k in range(6, 28):
+        if si + k < n:
+            out[si + k] = 0.0  # постразрядная изолиния
+    return out
+
 static func _add_artifacts(buf: PackedFloat32Array, p: Dictionary, lead: int, total_ms: float, n: int) -> void:
     var wander := float(p.get("baseline_wander", 0.0))  # дрейф изолинии, мм
     var mains := float(p.get("mains_noise", 0.0))        # сетевая наводка 50 Гц, мм

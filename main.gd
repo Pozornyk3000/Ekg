@@ -157,6 +157,7 @@ const PALETTES := {
     "light": {"name": "Светлая", "bg": "#e9eef6", "panel": "#ffffff", "panel2": "#eef3fb", "hover": "#dbe6f7", "accent": "#2f6df0", "accent_d": "#9fbcf0", "border": "#cdd9ee", "text": "#16233e", "dim": "#5d6e8e", "darktxt": "#ffffff", "trace": "#4db0ff", "mon_bg": "#081326", "grid": "#2a4f8f"},
 }
 const THEME_ORDER := ["blue", "green", "light"]
+const SHOCKABLE := ["vtach", "torsades", "bidirectional", "afib", "aflutter", "avnrt"]
 var prob_label: Label
 var diff_label: Label
 var drug_summary: Label
@@ -515,6 +516,12 @@ func _build_monitor_tab(tabs: TabContainer) -> void:
     theme_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
     theme_btn.pressed.connect(_cycle_theme)
     ctlrow.add_child(theme_btn)
+
+    var defib_btn := Button.new()
+    defib_btn.text = "⚡ Разряд (дефибрилляция / кардиоверсия)"
+    defib_btn.custom_minimum_size = Vector2(0, 42)
+    defib_btn.pressed.connect(_defib)
+    col.add_child(defib_btn)
 
     edit_btn = Button.new()
     edit_btn.text = "✏ Редактировать кривую (сетка ЭКГ)"
@@ -1280,6 +1287,16 @@ func _active_converter(base: String) -> String:
             return nm
     return ""
 
+func _toxic_drug(rhythm: String) -> String:
+    for i in DRUGS.size():
+        if active_drugs[i] == 2 and str(DRUGS[i].get("trhythm", "")) == rhythm:
+            return str(DRUGS[i]["name"])
+    return ""
+
+func _rhythm_rus(v: String) -> String:
+    var i := RHYTHM_VALUES.find(v)
+    return RHYTHM_NAMES[i] if i >= 0 else v
+
 # аритмия от токсичности (vtach приоритетнее av3)
 func _drug_rhythm() -> String:
     var found := ""
@@ -1437,6 +1454,32 @@ func _refresh_views() -> void:
         rate_slider.set_value_no_signal(float(params["hr"]))
         rate_label.text = "Частота (ЧСС):  %d уд/мин" % roundi(float(params["hr"]))
 
+func _defib() -> void:
+    if not _built or _last_eff.is_empty():
+        return
+    var base := str(_last_eff.get("rhythm", "sinus"))
+    if not (base in SHOCKABLE):
+        event_label.text = "⚡ Разряд: нет показаний (ритм не требует кардиоверсии)"
+        event_label.add_theme_color_override("font_color", Color(0.95, 0.85, 0.2))
+        return
+    var eff_before := _last_eff.duplicate(true)  # текущая аритмия (до разряда)
+    if _drug_rhythm() != "":
+        # Аритмию поддерживает препарат (токсичность) — разряд даёт лишь рецидив.
+        var steady0 := ECGModel.generate_monitor(_last_eff, selected_lead, 20000.0, 4000)
+        var dbuf := ECGModel.generate_defib(eff_before, eff_before, selected_lead, 20000.0, 4000, 4000.0)
+        monitor.play_transition(dbuf, steady0)
+        event_label.text = "⚡ Разряд: ритм рецидивирует — устраните причину (%s)" % _toxic_drug(base)
+        event_label.add_theme_color_override("font_color", Color(1.0, 0.5, 0.3))
+        return
+    params["rhythm"] = "sinus"
+    _recompute()  # 12 отведений/диагноз → синус; _last_eff теперь синус
+    var steady := ECGModel.generate_monitor(_last_eff, selected_lead, 20000.0, 4000)
+    var defib_buf := ECGModel.generate_defib(eff_before, _last_eff, selected_lead, 20000.0, 4000, 4000.0)
+    monitor.play_transition(defib_buf, steady)
+    _conv_shown_for = "sinus>sinus"  # не перезапускать анимацию на следующем refresh
+    event_label.text = "⚡ Электроимпульсная терапия: %s → синусовый ритм" % _rhythm_rus(base)
+    event_label.add_theme_color_override("font_color", Color(0.4, 0.85, 1.0))
+
 func _toggle_monitor_speed() -> void:
     if not monitor:
         return
@@ -1452,22 +1495,26 @@ func _refresh_monitor() -> void:
     monitor.hr_bpm = float(_last_eff.get("hr", 0.0))
     monitor.lead_name = LEADS[selected_lead]
     var base := str(params.get("rhythm", "sinus"))
-    var conv_drug := _active_converter(base)
+    var effr := str(_last_eff.get("rhythm", "sinus"))
     var steady := ECGModel.generate_monitor(_last_eff, selected_lead, 20000.0, 4000)
-    if conv_drug != "" and base != _conv_shown_for and not edit_mode:
-        # Анимация купирования: аритмия → (через ~5 с) синус, один проход.
+    var sig := base + ">" + effr
+    if effr != base and sig != _conv_shown_for and not edit_mode:
+        # Препарат изменил ритм: анимируем переход base→eff один раз (купирование/индукция).
         var eff_before: Dictionary = _last_eff.duplicate(true)
         eff_before["rhythm"] = base
         var trans := ECGModel.generate_transition(eff_before, _last_eff, selected_lead, 20000.0, 4000, 5000.0)
         monitor.play_transition(trans, steady)
-        _conv_shown_for = base
+        _conv_shown_for = sig
     else:
-        if conv_drug == "": _conv_shown_for = ""
+        if effr == base: _conv_shown_for = ""
         monitor.update_samples(steady)
-    if conv_drug != "":
-        var ri := RHYTHM_VALUES.find(base)
-        var rn := RHYTHM_NAMES[ri] if ri >= 0 else base
-        event_label.text = "✚ %s: купирование — %s → синусовый ритм" % [conv_drug, rn]
+    if effr != base:
+        if effr == "sinus":
+            event_label.text = "✚ %s: купирование — %s → синусовый ритм" % [_active_converter(base), _rhythm_rus(base)]
+            event_label.add_theme_color_override("font_color", Color(0.35, 1.0, 0.6))
+        else:
+            event_label.text = "⚠ %s (токсичность): %s" % [_toxic_drug(effr), _rhythm_rus(effr)]
+            event_label.add_theme_color_override("font_color", Color(1.0, 0.5, 0.3))
     else:
         event_label.text = ""
     monitor.queue_redraw()
