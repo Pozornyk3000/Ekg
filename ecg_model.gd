@@ -195,6 +195,28 @@ static func _gen_events(p: Dictionary, window: float = WINDOW_MS) -> Dictionary:
             vent.append({"t": tav, "kind": nkind})
             tav += rr
         return {"atrial": [], "vent": vent, "afib": false, "retro_p": true}
+    elif rhythm == "junctional":
+        # Узловой (АВ-узловой) выскальзывающий ритм: водитель в АВ-соединении, ЧСС 40–60,
+        # узкий QRS (проведение ниже His нормальное), P нет или ретроградный (отриц. в II).
+        var tj := 0.0
+        while tj < window:
+            vent.append({"t": tj, "kind": nkind})
+            tj += rr
+        return {"atrial": [], "vent": vent, "afib": false, "retro_p": true}
+    elif rhythm == "aivr":
+        # Ускоренный идиовентрикулярный ритм: желудочковый водитель 60–110/мин, широкие
+        # QRS; независимые синусовые P (АВ-диссоциация). Частый маркер реперфузии.
+        var rri := 60000.0 / hr
+        var tvi := 0.0
+        while tvi < window:
+            vent.append({"t": tvi, "kind": "vt"})
+            tvi += rri
+        var asin := 60000.0 / maxf(hr - 12.0, 35.0)
+        var tai := rng.randf_range(0.0, asin)
+        while tai < window:
+            atrial.append(tai)
+            tai += asin
+        return {"atrial": atrial, "vent": vent, "afib": false}
     elif rhythm == "wenckebach":
         # AV-блокада 2 ст., Мобитц I: PR прогрессивно удлиняется, пока QRS не выпадает
         # (P без QRS), затем цикл повторяется. 4:3 (выпадает каждый 4-й).
@@ -1263,6 +1285,12 @@ static func wellbeing(p: Dictionary, s: Dictionary) -> Dictionary:
     elif rhythm == "avnrt":
         issues.append("узловая тахикардия (АВУРТ) — сердцебиение, возможна гипотония")
         sev = maxi(sev, 2)
+    elif rhythm == "junctional":
+        issues.append("узловой (АВ-узловой) ритм — обычно стабилен, контроль ЧСС")
+        sev = maxi(sev, 1)
+    elif rhythm == "aivr":
+        issues.append("ускоренный идиовентрикулярный ритм — обычно доброкачественный (реперфузия)")
+        sev = maxi(sev, 1)
     elif rhythm == "sss":
         issues.append("синусовые паузы (СССУ) — головокружение, обмороки")
         sev = maxi(sev, 2)
@@ -1286,7 +1314,7 @@ static func wellbeing(p: Dictionary, s: Dictionary) -> Dictionary:
         issues.append("тяжёлая гипокалиемия — аритмии")
         sev = maxi(sev, 2)
 
-    if rhythm != "vtach" and rhythm != "vfib" and rhythm != "vfib_fine" and rhythm != "pea" and rhythm != "av3" and rhythm != "torsades" and rhythm != "bidirectional" and rhythm != "avnrt" and rhythm != "asystole" and not rhythm.begins_with("pace"):
+    if rhythm != "vtach" and rhythm != "vfib" and rhythm != "vfib_fine" and rhythm != "pea" and rhythm != "av3" and rhythm != "torsades" and rhythm != "bidirectional" and rhythm != "avnrt" and rhythm != "asystole" and rhythm != "junctional" and rhythm != "aivr" and not rhythm.begins_with("pace"):
         if hr >= 180.0:
             issues.append("крайняя тахикардия")
             sev = maxi(sev, 3)
