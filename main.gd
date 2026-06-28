@@ -164,6 +164,10 @@ var analysis_label: Label
 var monitor: MonitorView
 var preset_opt: OptionButton
 var rhythm_opt: OptionButton
+var _preset_order: Array = []   # индексы PRESETS в порядке показа (для шаговых стрелок)
+var _rhythm_order: Array = []   # индексы RHYTHM_VALUES в порядке показа
+var _cur_preset_i := 0
+var _cur_rhythm_i := 0
 var bbb_opt: OptionButton
 var lead_opt: OptionButton
 var rate_slider: HSlider
@@ -510,8 +514,9 @@ func _build_monitor_tab(tabs: TabContainer) -> void:
             var it := preset_opt.item_count
             preset_opt.add_item(str(PRESETS[pi]["name"]))
             preset_opt.set_item_id(it, pi)
+            _preset_order.append(pi)
     preset_opt.item_selected.connect(_apply_preset)
-    col.add_child(preset_opt)
+    _add_stepper(col, preset_opt, _step_preset)
 
     _mk_label(col, "Ритм:", 14)
     rhythm_opt = OptionButton.new()
@@ -524,8 +529,9 @@ func _build_monitor_tab(tabs: TabContainer) -> void:
             var item := rhythm_opt.item_count
             rhythm_opt.add_item(RHYTHM_NAMES[vi])
             rhythm_opt.set_item_id(item, vi)
+            _rhythm_order.append(vi)
     rhythm_opt.item_selected.connect(_on_rhythm)
-    col.add_child(rhythm_opt)
+    _add_stepper(col, rhythm_opt, _step_rhythm)
 
     _mk_label(col, "Блокада ножки:", 14)
     bbb_opt = OptionButton.new()
@@ -892,8 +898,36 @@ func _preset_group(pr: Dictionary) -> String:
         return "block"
     return "norm"
 
+# Ряд «◀ список ▶»: шаговые стрелки листают пресеты/ритмы, не открывая меню
+# (надёжно на мобильном — не зависит от прокрутки всплывающего списка).
+func _add_stepper(col: Node, opt: OptionButton, on_step: Callable) -> void:
+    var row := HBoxContainer.new()
+    row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    row.add_theme_constant_override("separation", 6)
+    var prev := Button.new()
+    prev.text = "◀"
+    prev.custom_minimum_size = Vector2(50, 42)
+    prev.pressed.connect(on_step.bind(-1))
+    row.add_child(prev)
+    opt.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    row.add_child(opt)
+    var nxt := Button.new()
+    nxt.text = "▶"
+    nxt.custom_minimum_size = Vector2(50, 42)
+    nxt.pressed.connect(on_step.bind(1))
+    row.add_child(nxt)
+    col.add_child(row)
+
+func _select_opt_by_id(opt: OptionButton, id: int) -> void:
+    for i in opt.item_count:
+        if opt.get_item_id(i) == id:
+            opt.selected = i  # .selected не эмитит сигнал — без рекурсии
+            return
+
 func _apply_preset(idx: int) -> void:
-    var pid := preset_opt.get_item_id(idx)  # id = индекс в PRESETS (списки сгруппированы)
+    _apply_preset_pid(preset_opt.get_item_id(idx))
+
+func _apply_preset_pid(pid: int) -> void:
     if pid < 0 or pid >= PRESETS.size():
         return
     var preset: Dictionary = PRESETS[pid]
@@ -903,7 +937,21 @@ func _apply_preset(idx: int) -> void:
     for key in preset["p"]: _set_value(key, preset["p"][key], true)
     for key in preset["s"]: _set_value(key, preset["s"][key], false)
     _suspend = false
+    _select_opt_by_id(preset_opt, pid)
+    _cur_preset_i = _preset_order.find(pid)
     _recompute()
+
+func _step_preset(dir: int) -> void:
+    if _preset_order.is_empty():
+        return
+    _cur_preset_i = wrapi(_cur_preset_i + dir, 0, _preset_order.size())
+    _apply_preset_pid(int(_preset_order[_cur_preset_i]))
+
+func _step_rhythm(dir: int) -> void:
+    if _rhythm_order.is_empty():
+        return
+    _cur_rhythm_i = wrapi(_cur_rhythm_i + dir, 0, _rhythm_order.size())
+    _apply_rhythm_vi(int(_rhythm_order[_cur_rhythm_i]))
 
 # ---------- Викторина «угадай диагноз» ----------
 func _build_quiz_tab(tabs: TabContainer) -> void:
@@ -1337,10 +1385,14 @@ func _stress_refresh_display() -> void:
             ECGModel.stress_verdict(peak_depr), ECGModel.stress_bp_verdict(stress_sten)]
 
 func _on_rhythm(idx: int) -> void:
-    var vi := rhythm_opt.get_item_id(idx)  # id пункта = индекс в RHYTHM_VALUES
+    _apply_rhythm_vi(rhythm_opt.get_item_id(idx))  # id пункта = индекс в RHYTHM_VALUES
+
+func _apply_rhythm_vi(vi: int) -> void:
     if vi < 0 or vi >= RHYTHM_VALUES.size():
         return
     params["rhythm"] = RHYTHM_VALUES[vi]
+    _select_opt_by_id(rhythm_opt, vi)
+    _cur_rhythm_i = _rhythm_order.find(vi)
     _recompute()
 
 func _on_bbb(idx: int) -> void:
@@ -1446,6 +1498,8 @@ func _sync_selectors() -> void:
         if rhythm_opt.get_item_id(ii) == ri:
             rhythm_opt.selected = ii
             break
+    if _rhythm_order.find(ri) >= 0:
+        _cur_rhythm_i = _rhythm_order.find(ri)  # держим шаговый индекс синхронным
     var bi := BBB_VALUES.find(str(params["bbb"]))
     bbb_opt.selected = bi if bi >= 0 else 0
     var fi := FOCUS_VALUES.find(str(params.get("vt_focus", "lv_lat_mid")))
