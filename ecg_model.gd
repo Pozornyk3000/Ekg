@@ -74,6 +74,14 @@ static func main_dir(p: Dictionary) -> Vector3:
     var a := deg_to_rad(float(p["qrs_axis"]))
     return _u(Vector3(cos(a), sin(a), 0.45))
 
+# Направления начального (септального/Q) и терминального (базального/S) векторов QRS —
+# совпадают с фиксированными векторами в _beat_components; нужны для правки Q/S по отведению.
+static func q_dir() -> Vector3:
+    return _u(Vector3(-0.55, -0.20, -0.45))
+
+static func s_dir() -> Vector3:
+    return _u(Vector3(-0.15, -0.25, 0.55))
+
 static func t_dir(p: Dictionary) -> Vector3:
     var block := -1
     var bbb := str(p.get("bbb", "none"))

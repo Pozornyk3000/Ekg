@@ -1624,7 +1624,8 @@ func _nz(x: float) -> float:
         return 0.15 if x >= 0.0 else -0.15
     return x
 
-func _apply_edit_param(feature: String, value: float) -> void:
+# Амплитуда (вертикаль маркера). Зубцы Q/S — это магнитуды фиксированных векторов модели.
+func _apply_edit_amp(feature: String, value: float) -> void:
     var i := selected_lead
     if feature == "ST":
         var v := clampf(value, -9.0, 9.0)
@@ -1638,15 +1639,39 @@ func _apply_edit_param(feature: String, value: float) -> void:
     elif feature == "T":
         var stp := _nz(ECGModel.LEADVEC[i].dot(ECGModel.t_dir(params)))
         params["t_amp"] = clampf(value / stp, -40.0, 40.0)
-    else:
+    elif feature == "Q":
+        var qp := _nz(ECGModel.LEADVEC[i].dot(ECGModel.q_dir()))
+        params["q_amp"] = clampf(value / qp, 0.0, 9.0)
+    elif feature == "S":
+        var spp := _nz(ECGModel.LEADVEC[i].dot(ECGModel.s_dir()))
+        params["s_amp"] = clampf(value / spp, 0.0, 30.0)
+    else:  # R
         var sr := _nz(ECGModel.LEADVEC[i].dot(ECGModel.main_dir(params)))
         params["r_amp"] = clampf(value / sr, -60.0, 60.0)
 
-func _on_edit_drag(feature: String, value: float) -> void:
+# Время (горизонталь маркера) → интервалы. t_ms — позиция указателя в окне (мс от начала).
+func _apply_edit_time(feature: String, t_ms: float) -> void:
+    var pr := float(params.get("pr", 160.0))
+    var qeff := float(_last_eff.get("qrs_eff", params.get("qrs_dur", 90.0)))
+    if feature == "P":
+        params["p_dur"] = clampf(t_ms * 2.0, 60.0, 200.0)          # P-зубец: ширина
+    elif feature == "R":
+        params["pr"] = clampf(t_ms - qeff * 0.45, 80.0, 360.0)     # сдвиг QRS = интервал PR
+    elif feature == "Q":
+        params["qrs_dur"] = clampf((pr - t_ms) * 2.0 + qeff, 50.0, 200.0)  # уширение влево
+    elif feature == "S":
+        params["qrs_dur"] = clampf((t_ms - pr) * 1.6, 50.0, 200.0)        # уширение вправо
+    elif feature == "T":
+        params["qt"] = clampf((t_ms - pr) / 0.6, 240.0, 640.0)    # положение T = интервал QT
+    # ST по времени не двигаем (точка J привязана к концу QRS)
+
+func _on_edit_drag(feature: String, value: float, t_ms: float) -> void:
     if not _built:
         return
-    _apply_edit_param(feature, value)
+    _apply_edit_amp(feature, value)
+    _apply_edit_time(feature, t_ms)
     var eff := _effective_params()
+    eff["qrs_eff"] = float(eff.get("qrs_dur", 90.0))  # держим оценку ширины QRS для маркеров
     _last_eff = eff
     if buffers.size() > selected_lead:
         buffers[selected_lead] = ECGModel.generate_lead(eff, selected_lead)

@@ -1,7 +1,7 @@
 class_name EditView
 extends Control
 
-signal handle_dragged(feature, value_mm)
+signal handle_dragged(feature, value_mm, time_ms)
 signal drag_ended
 
 const PX_PER_MM := 6.0       # масштаб сетки (квадрат как на реальной плёнке)
@@ -83,7 +83,7 @@ func _draw() -> void:
 func _draw_labels(_w: float, h: float) -> void:
     var f := ThemeDB.fallback_font
     draw_string(f, Vector2(7, 17), lead_name, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(0.10, 0.10, 0.10))
-    draw_string(f, Vector2(7, h - 7), "25 мм/с · 10 мм/мВ · клетка 0.04 с / 0.1 мВ · крупная 0.2 с / 0.5 мВ — тяни маркеры",
+    draw_string(f, Vector2(7, h - 7), "25 мм/с · 10 мм/мВ — тяни маркеры P/Q/R/S/T/ST: вверх-вниз = амплитуда, влево-вправо = время",
         HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.45, 0.20, 0.20))
 
 func _build_handles(nshow: int, w: float) -> void:
@@ -91,9 +91,9 @@ func _build_handles(nshow: int, w: float) -> void:
     var beat_end := mini(nshow, int(rr_ms / SAMPLE_DT))
     if beat_end < 6:
         beat_end = nshow
-    var qmarg := int(qrs_eff_ms / SAMPLE_DT)
+    var qmarg := maxi(int(qrs_eff_ms / SAMPLE_DT), 6)
 
-    # QRS — наибольшее по модулю отклонение
+    # R — наибольшее по модулю отклонение (центр QRS)
     var qi := 0
     var qv := -1.0
     for i in beat_end:
@@ -101,9 +101,12 @@ func _build_handles(nshow: int, w: float) -> void:
         if a > qv:
             qv = a
             qi = i
-    _add_handle("QRS", qi, w, nshow)
+    _add_handle("R", qi, w, nshow)
+    # Q — чуть раньше R; S — чуть позже R (маркеры стоят всегда, можно «вытянуть» зубец)
+    _add_handle("Q", clampi(qi - int(qmarg * 0.5), 0, beat_end - 1), w, nshow)
+    _add_handle("S", clampi(qi + int(qmarg * 0.5), 0, beat_end - 1), w, nshow)
 
-    # P — положительный горб до QRS
+    # P — положительный горб до QRS (если есть)
     if has_p:
         var pend := maxi(0, qi - qmarg - 2)
         var pi := -1
@@ -112,8 +115,9 @@ func _build_handles(nshow: int, w: float) -> void:
             if samples[i] > pv:
                 pv = samples[i]
                 pi = i
-        if pi >= 0:
-            _add_handle("P", pi, w, nshow)
+        if pi < 0:
+            pi = clampi(qi - qmarg - int(qmarg * 0.8), 0, beat_end - 1)  # запасная позиция
+        _add_handle("P", pi, w, nshow)
 
     # T — наибольшее по модулю после QRS
     var tstart := mini(beat_end - 1, qi + qmarg + 3)
@@ -123,10 +127,11 @@ func _build_handles(nshow: int, w: float) -> void:
         if absf(samples[i]) > tv:
             tv = absf(samples[i])
             ti = i
-    if ti >= 0:
-        _add_handle("T", ti, w, nshow)
+    if ti < 0:
+        ti = clampi(qi + qmarg * 2, 0, beat_end - 1)
+    _add_handle("T", ti, w, nshow)
 
-    # ST — уровень сегмента из вектора ST (без влияния зубца T), маркер у точки J
+    # ST / повреждение (инфаркт) — уровень сегмента, маркер у точки J
     var si := mini(beat_end - 1, maxi(0, qi + int(qmarg * 0.65) + 2))
     var sx := si / float(maxi(nshow - 1, 1)) * w
     _handles.append({"feature": "ST", "pos": Vector2(sx, _baseline - st_level * PX_PER_MM), "value": st_level})
@@ -176,6 +181,7 @@ func _gui_input(event: InputEvent) -> void:
             drag_ended.emit()
             accept_event()
     elif moving and _drag != "":
-        var val_mm := (_baseline - pos.y) / PX_PER_MM
-        handle_dragged.emit(_drag, val_mm)
+        var val_mm := (_baseline - pos.y) / PX_PER_MM       # вертикаль — амплитуда (мВ·10)
+        var t_ms := clampf(pos.x / maxf(size.x, 1.0), 0.0, 1.0) * _win_ms()  # горизонталь — время
+        handle_dragged.emit(_drag, val_mm, t_ms)
         accept_event()
