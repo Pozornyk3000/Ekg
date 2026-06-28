@@ -106,10 +106,35 @@ static func _gen_events(p: Dictionary, window: float = WINDOW_MS) -> Dictionary:
     rng.seed = 987654
 
     if rhythm == "afib":
+        # Феномен Ашмана: после цикла «длинный-короткий RR» очередной комплекс проводится
+        # аберрантно (картина БПНПГ), т.к. правая ножка ещё рефрактерна — имитирует ЖЭ.
+        var ashman := bool(p.get("ashman", false))
+        var times: Array = []
         var taf := rng.randf_range(0.0, rr * 0.6)
         while taf < window:
-            vent.append({"t": taf, "kind": nkind})
+            times.append(taf)
             taf += rr * rng.randf_range(0.5, 1.6)
+        var kinds: Array = []
+        var any_ab := false
+        var best_bi := -1
+        var best_contrast := 0.0
+        for bi in range(times.size()):
+            var k := nkind
+            if ashman and nkind == "n" and bi >= 2:
+                var rrp: float = float(times[bi]) - float(times[bi - 1])
+                var rrp2: float = float(times[bi - 1]) - float(times[bi - 2])
+                if rrp2 > rr * 1.1 and rrp < rr * 0.85:
+                    k = "rbbb"
+                    any_ab = true
+                var contrast := rrp2 - rrp
+                if contrast > best_contrast:
+                    best_contrast = contrast
+                    best_bi = bi
+            kinds.append(k)
+        if ashman and not any_ab and best_bi >= 0 and nkind == "n":
+            kinds[best_bi] = "rbbb"
+        for bi in range(times.size()):
+            vent.append({"t": float(times[bi]), "kind": str(kinds[bi])})
         return {"atrial": [], "vent": vent, "afib": true}
     elif rhythm == "aflutter":
         # Трепетание предсердий: предсердия ~300/мин (пилообразные F), желудочки —
@@ -907,6 +932,27 @@ static func measure_rs(buf: PackedFloat32Array, lo: int, hi: int) -> Vector2:
         r = maxf(r, buf[i])
         s = maxf(s, -buf[i])
     return Vector2(r, s)
+
+# Критерии Сгарбоссы: распознавание ОКС на фоне ЛБНПГ / желудочковой ЭКС, где обычные
+# критерии STEMI не работают (QRS уширен, ST вторично дискордантен). Балл ≥3 — вероятен ИМ.
+#   A (5): конкордантный подъём ST ≥1 мм в отведении с положительным QRS;
+#   B (3): конкордантная депрессия ST ≥1 мм в V1-V3 (QRS отрицательный);
+#   C (2): чрезмерно дискордантный ST ≥5 мм (противоположно главному зубцу QRS).
+static func sgarbossa(p: Dictionary, rs: Array) -> Dictionary:
+    var a := false
+    var b := false
+    var c := false
+    for i in range(mini(rs.size(), 12)):
+        var net: float = rs[i].x - rs[i].y
+        var st := st_level_lead(p, i)
+        if net > 0.5 and st >= 1.0:
+            a = true
+        if (i == 6 or i == 7 or i == 8) and net < -0.5 and st <= -1.0:
+            b = true
+        if net * st < 0.0 and absf(st) >= 5.0:
+            c = true
+    var score := (5 if a else 0) + (3 if b else 0) + (2 if c else 0)
+    return {"score": score, "a": a, "b": b, "c": c}
 
 static func sokolow(rs: Array) -> Dictionary:
     var sv1: float = rs[6].y

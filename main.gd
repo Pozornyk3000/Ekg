@@ -11,7 +11,7 @@ const DEFAULTS := {
     "resp_arr": 0.06, "baseline_wander": 0.0, "mains_noise": 0.0, "cpr": 0.0,
     "st_shape": 0.0, "p_morph": "normal",
     "delta_amp": 0.0, "j_wave": 0.0, "t_post": 0.0, "pr_dep": 0.0, "strain": 0.0, "rv_boost": 0.0,
-    "hemiblock": "none",
+    "hemiblock": "none", "ashman": false,
 }
 const STATE_DEFAULTS := {
     "k": 4.0, "ca": 2.4, "mg": 0.85, "na": 140.0,
@@ -118,6 +118,7 @@ const PRESETS := [
     {"name": "Детское сердце", "p": {"rhythm": "sinus", "bbb": "none", "hr": 130.0, "pr": 110.0, "qt": 300.0, "qrs_axis": 100.0, "qrs_dur": 70.0, "r_amp": 10.0}, "s": {}},
     {"name": "Сердце атлета", "p": {"rhythm": "sinus", "bbb": "none", "hr": 48.0, "pr": 205.0, "r_amp": 17.0, "s_amp": 8.0, "qrs_axis": 65.0}, "s": {"bp_sys": 118.0}},
     {"name": "Фибрилляция предсердий", "p": {"rhythm": "afib", "hr": 110.0, "p_amp": 0.0}, "s": {}},
+    {"name": "ФП с феноменом Ашмана (аберрация)", "p": {"rhythm": "afib", "hr": 95.0, "p_amp": 0.0, "ashman": true}, "s": {}},
     {"name": "Трепетание предсердий 2:1", "p": {"rhythm": "aflutter", "hr": 150.0, "p_amp": 0.0}, "s": {}},
     {"name": "Трепетание предсердий 4:1", "p": {"rhythm": "aflutter", "hr": 75.0, "p_amp": 0.0}, "s": {}},
     {"name": "Гиперкалиемия", "p": {}, "s": {"k": 7.0}},
@@ -1733,6 +1734,8 @@ func _explain(eff: Dictionary, es: Dictionary, sok: Dictionary) -> String:
             return "Как отличить: спайки есть, QRS за ними нет · Почему: импульс не захватывает миокард (смещение электрода / высокий порог)."
         if pf == "undersense":
             return "Как отличить: спайки ложатся на собственные комплексы · Почему: ЭКС не «видит» свои сокращения (недочувствительность)."
+    if rhythm == "afib" and bool(eff.get("ashman", false)):
+        return "Как отличить: на фоне нерегулярной ФП — широкий (БПНПГ) комплекс после цикла «длинный-короткий RR» · Почему: феномен Ашмана — правая ножка ещё рефрактерна (это аберрация, не ЖЭ)."
     var R := {
         "afib": "Как отличить: нет зубцов P, мелковолнистая изолиния, RR абсолютно нерегулярный · Почему: хаотичное возбуждение предсердий, АВ-узел проводит беспорядочно.",
         "aflutter": "Как отличить: пилообразные волны F ~300/мин (II, III, aVF), проведение N:1 · Почему: macro-re-entry в правом предсердии вокруг трикуспидального кольца.",
@@ -1978,6 +1981,19 @@ func _recompute() -> void:
     wb_label.add_theme_color_override("font_color", wbcol)
 
     report_label.text = ECGModel.ecg_report(eff, sok, axis_lbl, res)
+    # Критерии Сгарбоссы — только когда обычная оценка ST не работает (ЛБНПГ / желуд. ЭКС).
+    var paced_v := rhythm == "pace_vvi" or rhythm == "pace_ddd" or rhythm == "pace_biv"
+    if str(eff.get("bbb", "none")) == "lbbb" or paced_v:
+        var sg := ECGModel.sgarbossa(eff, rs)
+        var crit: Array = []
+        if sg["a"]: crit.append("конкордантный подъём")
+        if sg["b"]: crit.append("конкордантная депрессия V1-V3")
+        if sg["c"]: crit.append("чрезмерная дискордантность ≥5 мм")
+        if int(sg["score"]) >= 3:
+            report_label.text += "\nКритерии Сгарбоссы: %d балла (%s) → подозрение на ОКС на фоне %s." % [
+                int(sg["score"]), ", ".join(crit), "ЭКС" if paced_v else "ЛБНПГ"]
+        else:
+            report_label.text += "\nКритерии Сгарбоссы: 0 — ST вторично дискордантен (норма для %s)." % ("ЭКС" if paced_v else "ЛБНПГ")
     expl_label.text = _explain(eff, es, sok)
 
     var diff := ECGModel.pathology_probabilities(eff, es)
