@@ -936,7 +936,7 @@ func _preset_cat_index(key: String) -> int:
 func _rhythm_cat_index(vi: int) -> int:
     if vi < 0 or vi >= RHYTHM_VALUES.size():
         return 0
-    var val := RHYTHM_VALUES[vi]
+    var val: String = RHYTHM_VALUES[vi]
     for i in RHYTHM_GROUPS.size():
         if val in RHYTHM_GROUPS[i][1]:
             return i
