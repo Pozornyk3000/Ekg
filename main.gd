@@ -27,6 +27,12 @@ const RHYTHM_GROUPS := [
     ["Блокады, паузы, эскейп", ["wenckebach", "mobitz2", "av3", "sss", "junctional"]],
     ["Кардиостимулятор", ["pace_vvi", "pace_aai", "pace_ddd", "pace_biv"]],
 ]
+# Категории пресетов: [ключ _preset_group, заголовок]. Зависимые списки: выбор
+# категории фильтрует второй список (каскадные выпадающие, а не один с разделителями).
+const PRESET_CATS := [
+    ["norm", "Норма и варианты"], ["arr", "Аритмии"], ["block", "Блокады и гипертрофия"],
+    ["mi", "Инфаркт / ишемия"], ["synd", "Электролиты и синдромы"], ["pace", "Кардиостимулятор"],
+]
 const PACE_FAULT_NAMES := ["ЭКС: норма", "Потеря захвата", "Undersensing (асинхронно)"]
 const PACE_FAULT_VALUES := ["none", "loss_capture", "undersense"]
 const PVC_NAMES := ["Нет", "Редкие", "Частые"]
@@ -164,10 +170,12 @@ var analysis_label: Label
 var monitor: MonitorView
 var preset_opt: OptionButton
 var rhythm_opt: OptionButton
-var _preset_order: Array = []   # индексы PRESETS в порядке показа (для шаговых стрелок)
-var _rhythm_order: Array = []   # индексы RHYTHM_VALUES в порядке показа
-var _cur_preset_i := 0
-var _cur_rhythm_i := 0
+var preset_cat_opt: OptionButton
+var rhythm_cat_opt: OptionButton
+var _cur_cat_pids: Array = []   # pid пресетов текущей категории (для стрелок)
+var _cur_grp_vis: Array = []    # vi ритмов текущей группы
+var _cur_preset_pid := 0
+var _cur_rhythm_vi := 0
 var bbb_opt: OptionButton
 var lead_opt: OptionButton
 var rate_slider: HSlider
@@ -496,42 +504,37 @@ func _build_monitor_tab(tabs: TabContainer) -> void:
     col.add_theme_constant_override("separation", 8)
     sc.add_child(col)
 
-    _mk_label(col, "Патология (пресет):", 14)
+    # Каскадные списки: категория → отфильтрованный второй список (короткий, удобный
+    # для прокрутки/стрелок на мобильном), вместо одного длинного с разделителями.
+    _mk_label(col, "Категория патологии:", 14)
+    preset_cat_opt = OptionButton.new()
+    preset_cat_opt.custom_minimum_size = Vector2(0, 42)
+    for g in PRESET_CATS:
+        preset_cat_opt.add_item(str(g[1]))
+    preset_cat_opt.item_selected.connect(_on_preset_cat)
+    col.add_child(preset_cat_opt)
+
+    _mk_label(col, "Пресет:", 14)
     preset_opt = OptionButton.new()
     preset_opt.custom_minimum_size = Vector2(0, 42)
-    # Группировка по категориям: заголовок-разделитель + пункты; id = индекс в PRESETS.
-    var pgroups := [
-        ["norm", "Норма и варианты"], ["arr", "Аритмии"], ["block", "Блокады и гипертрофия"],
-        ["mi", "Инфаркт / ишемия"], ["synd", "Электролиты и синдромы"], ["pace", "Кардиостимулятор"],
-    ]
-    for g in pgroups:
-        var added := false
-        for pi in PRESETS.size():
-            if _preset_group(PRESETS[pi]) != g[0]: continue
-            if not added:
-                preset_opt.add_separator(str(g[1]))
-                added = true
-            var it := preset_opt.item_count
-            preset_opt.add_item(str(PRESETS[pi]["name"]))
-            preset_opt.set_item_id(it, pi)
-            _preset_order.append(pi)
     preset_opt.item_selected.connect(_apply_preset)
     _add_stepper(col, preset_opt, _step_preset)
+    _fill_preset_items(0)
+
+    _mk_label(col, "Группа ритма:", 14)
+    rhythm_cat_opt = OptionButton.new()
+    rhythm_cat_opt.custom_minimum_size = Vector2(0, 42)
+    for grp in RHYTHM_GROUPS:
+        rhythm_cat_opt.add_item(str(grp[0]))
+    rhythm_cat_opt.item_selected.connect(_on_rhythm_cat)
+    col.add_child(rhythm_cat_opt)
 
     _mk_label(col, "Ритм:", 14)
     rhythm_opt = OptionButton.new()
     rhythm_opt.custom_minimum_size = Vector2(0, 42)
-    # Сгруппированный список: заголовок-разделитель + пункты; id пункта = индекс в RHYTHM_VALUES.
-    for grp in RHYTHM_GROUPS:
-        rhythm_opt.add_separator(str(grp[0]))
-        for val in grp[1]:
-            var vi: int = RHYTHM_VALUES.find(val)
-            var item := rhythm_opt.item_count
-            rhythm_opt.add_item(RHYTHM_NAMES[vi])
-            rhythm_opt.set_item_id(item, vi)
-            _rhythm_order.append(vi)
     rhythm_opt.item_selected.connect(_on_rhythm)
     _add_stepper(col, rhythm_opt, _step_rhythm)
+    _fill_rhythm_items(0)
 
     _mk_label(col, "Блокада ножки:", 14)
     bbb_opt = OptionButton.new()
@@ -924,6 +927,53 @@ func _select_opt_by_id(opt: OptionButton, id: int) -> void:
             opt.selected = i  # .selected не эмитит сигнал — без рекурсии
             return
 
+func _preset_cat_index(key: String) -> int:
+    for i in PRESET_CATS.size():
+        if str(PRESET_CATS[i][0]) == key:
+            return i
+    return 0
+
+func _rhythm_cat_index(vi: int) -> int:
+    if vi < 0 or vi >= RHYTHM_VALUES.size():
+        return 0
+    var val := RHYTHM_VALUES[vi]
+    for i in RHYTHM_GROUPS.size():
+        if val in RHYTHM_GROUPS[i][1]:
+            return i
+    return 0
+
+# Заполнить второй список пресетами выбранной категории (без применения).
+func _fill_preset_items(cat: int) -> void:
+    _cur_cat_pids = []
+    preset_opt.clear()
+    var key := str(PRESET_CATS[cat][0])
+    for pi in PRESETS.size():
+        if _preset_group(PRESETS[pi]) != key: continue
+        var it := preset_opt.item_count
+        preset_opt.add_item(str(PRESETS[pi]["name"]))
+        preset_opt.set_item_id(it, pi)
+        _cur_cat_pids.append(pi)
+
+func _fill_rhythm_items(cat: int) -> void:
+    _cur_grp_vis = []
+    rhythm_opt.clear()
+    for val in RHYTHM_GROUPS[cat][1]:
+        var vi: int = RHYTHM_VALUES.find(val)
+        var it := rhythm_opt.item_count
+        rhythm_opt.add_item(RHYTHM_NAMES[vi])
+        rhythm_opt.set_item_id(it, vi)
+        _cur_grp_vis.append(vi)
+
+func _on_preset_cat(cat: int) -> void:
+    _fill_preset_items(cat)
+    if not _cur_cat_pids.is_empty():
+        _apply_preset_pid(int(_cur_cat_pids[0]))
+
+func _on_rhythm_cat(cat: int) -> void:
+    _fill_rhythm_items(cat)
+    if not _cur_grp_vis.is_empty():
+        _apply_rhythm_vi(int(_cur_grp_vis[0]))
+
 func _apply_preset(idx: int) -> void:
     _apply_preset_pid(preset_opt.get_item_id(idx))
 
@@ -931,27 +981,35 @@ func _apply_preset_pid(pid: int) -> void:
     if pid < 0 or pid >= PRESETS.size():
         return
     var preset: Dictionary = PRESETS[pid]
+    # синхронизируем оба списка (категория + пункт), сигналы при .selected не идут
+    var cat := _preset_cat_index(_preset_group(preset))
+    preset_cat_opt.selected = cat
+    _fill_preset_items(cat)
+    _select_opt_by_id(preset_opt, pid)
+    _cur_preset_pid = pid
     _suspend = true
     for key in DEFAULTS: _set_value(key, DEFAULTS[key], true)
     for key in STATE_DEFAULTS: _set_value(key, STATE_DEFAULTS[key], false)
     for key in preset["p"]: _set_value(key, preset["p"][key], true)
     for key in preset["s"]: _set_value(key, preset["s"][key], false)
     _suspend = false
-    _select_opt_by_id(preset_opt, pid)
-    _cur_preset_i = _preset_order.find(pid)
     _recompute()
 
 func _step_preset(dir: int) -> void:
-    if _preset_order.is_empty():
+    if _cur_cat_pids.is_empty():
         return
-    _cur_preset_i = wrapi(_cur_preset_i + dir, 0, _preset_order.size())
-    _apply_preset_pid(int(_preset_order[_cur_preset_i]))
+    var i := _cur_cat_pids.find(_cur_preset_pid)
+    if i < 0: i = 0
+    i = wrapi(i + dir, 0, _cur_cat_pids.size())
+    _apply_preset_pid(int(_cur_cat_pids[i]))
 
 func _step_rhythm(dir: int) -> void:
-    if _rhythm_order.is_empty():
+    if _cur_grp_vis.is_empty():
         return
-    _cur_rhythm_i = wrapi(_cur_rhythm_i + dir, 0, _rhythm_order.size())
-    _apply_rhythm_vi(int(_rhythm_order[_cur_rhythm_i]))
+    var i := _cur_grp_vis.find(_cur_rhythm_vi)
+    if i < 0: i = 0
+    i = wrapi(i + dir, 0, _cur_grp_vis.size())
+    _apply_rhythm_vi(int(_cur_grp_vis[i]))
 
 # ---------- Викторина «угадай диагноз» ----------
 func _build_quiz_tab(tabs: TabContainer) -> void:
@@ -1391,8 +1449,11 @@ func _apply_rhythm_vi(vi: int) -> void:
     if vi < 0 or vi >= RHYTHM_VALUES.size():
         return
     params["rhythm"] = RHYTHM_VALUES[vi]
+    var cat := _rhythm_cat_index(vi)
+    rhythm_cat_opt.selected = cat
+    _fill_rhythm_items(cat)
     _select_opt_by_id(rhythm_opt, vi)
-    _cur_rhythm_i = _rhythm_order.find(vi)
+    _cur_rhythm_vi = vi
     _recompute()
 
 func _on_bbb(idx: int) -> void:
@@ -1494,12 +1555,12 @@ func _on_lead_opt(idx: int) -> void:
 
 func _sync_selectors() -> void:
     var ri := RHYTHM_VALUES.find(str(params["rhythm"]))
-    for ii in rhythm_opt.item_count:  # выбрать пункт с нужным id (списки сгруппированы)
-        if rhythm_opt.get_item_id(ii) == ri:
-            rhythm_opt.selected = ii
-            break
-    if _rhythm_order.find(ri) >= 0:
-        _cur_rhythm_i = _rhythm_order.find(ri)  # держим шаговый индекс синхронным
+    if ri >= 0:  # отразить текущий ритм в каскадных списках (группа + пункт)
+        var rcat := _rhythm_cat_index(ri)
+        rhythm_cat_opt.selected = rcat
+        _fill_rhythm_items(rcat)
+        _select_opt_by_id(rhythm_opt, ri)
+        _cur_rhythm_vi = ri
     var bi := BBB_VALUES.find(str(params["bbb"]))
     bbb_opt.selected = bi if bi >= 0 else 0
     var fi := FOCUS_VALUES.find(str(params.get("vt_focus", "lv_lat_mid")))
