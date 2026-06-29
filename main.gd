@@ -159,6 +159,9 @@ var _last_eff: Dictionary = {}
 var edit_view: EditView
 var edit_btn: Button
 var edit_mode := false
+var _edit_feat := ""        # текущий перетаскиваемый маркер (для относительной правки времени)
+var _edit_t0 := 0.0         # точка захвата по времени, мс
+var _edit_base := {}        # снимок интервалов в начале жеста
 var _built := false
 var _suspend := false
 
@@ -1649,27 +1652,32 @@ func _apply_edit_amp(feature: String, value: float) -> void:
         var sr := _nz(ECGModel.LEADVEC[i].dot(ECGModel.main_dir(params)))
         params["r_amp"] = clampf(value / sr, -60.0, 60.0)
 
-# Время (горизонталь маркера) → интервалы. t_ms — позиция указателя в окне (мс от начала).
-func _apply_edit_time(feature: String, t_ms: float) -> void:
-    var pr := float(params.get("pr", 160.0))
-    var qeff := float(_last_eff.get("qrs_eff", params.get("qrs_dur", 90.0)))
+# Время (горизонталь) — ОТНОСИТЕЛЬНОЕ перетягивание: интервал меняется на смещение
+# указателя от точки захвата (dms). Это идемпотентно: касание без движения ничего не
+# двигает (нет скачка), а реакция монотонна. База берётся в начале каждого жеста.
+func _apply_edit_time_rel(feature: String, dms: float) -> void:
     if feature == "P":
-        params["p_dur"] = clampf(t_ms * 2.0, 60.0, 200.0)          # P-зубец: ширина
+        params["p_dur"] = clampf(float(_edit_base.get("p_dur", 90.0)) + dms * 2.0, 60.0, 200.0)
     elif feature == "R":
-        params["pr"] = clampf(t_ms - qeff * 0.45, 80.0, 360.0)     # сдвиг QRS = интервал PR
+        params["pr"] = clampf(float(_edit_base.get("pr", 160.0)) + dms, 80.0, 360.0)  # PR
     elif feature == "Q":
-        params["qrs_dur"] = clampf((pr - t_ms) * 2.0 + qeff, 50.0, 200.0)  # уширение влево
+        params["qrs_dur"] = clampf(float(_edit_base.get("qrs_dur", 90.0)) - dms * 2.0, 50.0, 200.0)
     elif feature == "S":
-        params["qrs_dur"] = clampf((t_ms - pr) * 1.6, 50.0, 200.0)        # уширение вправо
+        params["qrs_dur"] = clampf(float(_edit_base.get("qrs_dur", 90.0)) + dms * 1.8, 50.0, 200.0)
     elif feature == "T":
-        params["qt"] = clampf((t_ms - pr) / 0.6, 240.0, 640.0)    # положение T = интервал QT
+        params["qt"] = clampf(float(_edit_base.get("qt", 380.0)) + dms * 1.6, 240.0, 640.0)  # QT
     # ST по времени не двигаем (точка J привязана к концу QRS)
 
 func _on_edit_drag(feature: String, value: float, t_ms: float) -> void:
     if not _built:
         return
+    if feature != _edit_feat:   # новый жест — снимок интервалов и точки захвата
+        _edit_feat = feature
+        _edit_t0 = t_ms
+        _edit_base = {"pr": params.get("pr", 160.0), "qt": params.get("qt", 380.0),
+            "qrs_dur": params.get("qrs_dur", 90.0), "p_dur": params.get("p_dur", 90.0)}
     _apply_edit_amp(feature, value)
-    _apply_edit_time(feature, t_ms)
+    _apply_edit_time_rel(feature, t_ms - _edit_t0)
     var eff := _effective_params()
     eff["qrs_eff"] = float(eff.get("qrs_dur", 90.0))  # держим оценку ширины QRS для маркеров
     _last_eff = eff
@@ -1678,6 +1686,7 @@ func _on_edit_drag(feature: String, value: float, t_ms: float) -> void:
     _refresh_edit()
 
 func _on_edit_release() -> void:
+    _edit_feat = ""  # завершить жест — следующее касание снимет новый снимок
     if not _built:
         return
     _recompute()
