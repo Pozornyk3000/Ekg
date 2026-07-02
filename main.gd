@@ -33,6 +33,29 @@ const PRESET_CATS := [
     ["norm", "Норма и варианты"], ["arr", "Аритмии"], ["block", "Блокады и гипертрофия"],
     ["mi", "Инфаркт / ишемия"], ["synd", "Электролиты и синдромы"], ["pace", "Кардиостимулятор"],
 ]
+# Основной диагноз по ритму: значение → [название, уверенность]. pace_vvi обрабатывается
+# отдельно (зависит от неисправности); sinus/электролиты — через classify/electrolyte_dx.
+const RHYTHM_DX := {
+    "afib": ["Фибрилляция предсердий", 0.9],
+    "aflutter": ["Трепетание предсердий (волны F)", 0.92],
+    "vtach": ["Желудочковая тахикардия", 0.95],
+    "torsades": ["Тахикардия пируэт (Torsades)", 0.95],
+    "bidirectional": ["Двунаправленная ЖТ (дигоксиновая интоксикация)", 0.93],
+    "avnrt": ["АВУРТ (узловая тахикардия)", 0.9],
+    "junctional": ["Узловой (АВ-узловой) ритм", 0.88],
+    "aivr": ["Ускоренный идиовентрикулярный ритм (AIVR)", 0.88],
+    "sss": ["СССУ (синусовые паузы)", 0.88],
+    "wenckebach": ["AV-блокада 2 ст. Мобитц I (Венкебах)", 0.9],
+    "mobitz2": ["AV-блокада 2 ст. Мобитц II", 0.9],
+    "av3": ["Полная AV-блокада (диссоциация)", 0.9],
+    "vfib": ["ФИБРИЛЛЯЦИЯ ЖЕЛУДОЧКОВ — остановка кровообращения", 0.98],
+    "vfib_fine": ["Мелковолновая ФЖ — остановка кровообращения", 0.9],
+    "pea": ["ЭМД / PEA — электрическая активность без пульса", 0.95],
+    "asystole": ["АСИСТОЛИЯ — остановка кровообращения", 0.97],
+    "pace_aai": ["ЭКС: предсердная стимуляция (AAI)", 0.92],
+    "pace_ddd": ["ЭКС: двухкамерная стимуляция (DDD)", 0.92],
+    "pace_biv": ["ЭКС: бивентрикулярная стимуляция (BiV/CRT)", 0.92],
+}
 const PACE_FAULT_NAMES := ["ЭКС: норма", "Потеря захвата", "Undersensing (асинхронно)"]
 const PACE_FAULT_VALUES := ["none", "loss_capture", "undersense"]
 const PVC_NAMES := ["Нет", "Редкие", "Частые"]
@@ -194,6 +217,8 @@ var theme_name := "blue"
 var section_bars: Array = []
 var event_label: Label
 var expl_label: Label
+var vitals_label: Label      # компактная плашка: ЧСС · ось · QTc · вероятность
+var lead_sel_label: Label    # подпись выбранного отведения над сеткой
 var _conv_shown_for := ""
 
 const PALETTES := {
@@ -246,6 +271,8 @@ var exam_best := 0
 const EXAM_TOTAL := 10
 
 const SETTINGS_PATH := "user://settings.cfg"
+const ROW_H := 42   # высота выпадающих списков и слайдеров
+const BTN_H := 42   # высота кнопок
 
 func _load_settings() -> void:
     var cfg := ConfigFile.new()
@@ -286,10 +313,17 @@ func _ready() -> void:
     vb.add_theme_constant_override("separation", 5)
     margin.add_child(vb)
 
+    # Компактная шапка: крупный диагноз, плашка витальных, самочувствие, событие, подсказка.
+    # Подробный отчёт и дифф-диагноз ушли во вкладку «Анализ» — экономим вертикаль на телефоне.
     dx_label = Label.new()
     dx_label.add_theme_font_size_override("font_size", 22)
     dx_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
     vb.add_child(dx_label)
+
+    vitals_label = Label.new()
+    vitals_label.add_theme_font_size_override("font_size", 14)
+    vitals_label.add_theme_color_override("font_color", Color(0.62, 0.82, 1.0))
+    vb.add_child(vitals_label)
 
     wb_label = Label.new()
     wb_label.add_theme_font_size_override("font_size", 15)
@@ -301,17 +335,6 @@ func _ready() -> void:
     event_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
     event_label.add_theme_color_override("font_color", Color(0.35, 1.0, 0.6))
     vb.add_child(event_label)
-
-    report_label = Label.new()
-    report_label.add_theme_font_size_override("font_size", 13)
-    report_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-    report_label.modulate = Color(0.82, 0.87, 0.92)
-    vb.add_child(report_label)
-
-    prob_label = Label.new()
-    prob_label.add_theme_font_size_override("font_size", 14)
-    prob_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-    vb.add_child(prob_label)
 
     # Строчка-подсказка: как отличить паттерн на ЭКГ и почему он так выглядит.
     expl_label = Label.new()
@@ -459,6 +482,9 @@ func _build_theme(P: Dictionary) -> Theme:
     t.set_color("font_color", "PopupMenu", TEXT)
     t.set_color("font_hover_color", "PopupMenu", ACCENT)
 
+    # Карточки-секции (PanelContainer) — чуть светлее фона вкладки, тонкая рамка.
+    t.set_stylebox("panel", "PanelContainer", _sbflat(PANEL2, 12, 1, BORDER, 12))
+
     t.set_stylebox("panel", "TabContainer", _sbflat(PANEL, 12, 1, BORDER, 12))
     t.set_stylebox("tabbar_background", "TabContainer", _sbflat(Color(0, 0, 0, 0), 0))
     t.set_stylebox("tab_selected", "TabContainer", _sbflat(ACCENT, 8, 0, Color(0, 0, 0, 0), 12))
@@ -498,93 +524,42 @@ func _build_theme(P: Dictionary) -> Theme:
     return t
 
 func _build_monitor_tab(tabs: TabContainer) -> void:
-    var sc := ScrollContainer.new()
-    sc.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-    tabs.add_child(sc)
-    tabs.set_tab_title(0, "Монитор")
-    var col := VBoxContainer.new()
-    col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-    col.add_theme_constant_override("separation", 8)
-    sc.add_child(col)
+    var col := _mk_tab(tabs, 0, "Монитор", 10)
 
-    # Каскадные списки: категория → отфильтрованный второй список (короткий, удобный
-    # для прокрутки/стрелок на мобильном), вместо одного длинного с разделителями.
-    _mk_label(col, "Категория патологии:", 14)
+    # --- Карточка: патология и ритм (каскадные списки + стрелки ◀▶) ---
+    var cp := _mk_card(col, "Патология и ритм")
+    _mk_label(cp, "Категория патологии:", 13)
     preset_cat_opt = OptionButton.new()
-    preset_cat_opt.custom_minimum_size = Vector2(0, 42)
+    preset_cat_opt.custom_minimum_size = Vector2(0, ROW_H)
     for g in PRESET_CATS:
         preset_cat_opt.add_item(str(g[1]))
     preset_cat_opt.item_selected.connect(_on_preset_cat)
-    col.add_child(preset_cat_opt)
-
-    _mk_label(col, "Пресет:", 14)
+    cp.add_child(preset_cat_opt)
+    _mk_label(cp, "Пресет:", 13)
     preset_opt = OptionButton.new()
-    preset_opt.custom_minimum_size = Vector2(0, 42)
+    preset_opt.custom_minimum_size = Vector2(0, ROW_H)
     preset_opt.item_selected.connect(_apply_preset)
-    _add_stepper(col, preset_opt, _step_preset)
+    _add_stepper(cp, preset_opt, _step_preset)
     _fill_preset_items(0)
-
-    _mk_label(col, "Группа ритма:", 14)
+    _mk_label(cp, "Группа ритма:", 13)
     rhythm_cat_opt = OptionButton.new()
-    rhythm_cat_opt.custom_minimum_size = Vector2(0, 42)
+    rhythm_cat_opt.custom_minimum_size = Vector2(0, ROW_H)
     for grp in RHYTHM_GROUPS:
         rhythm_cat_opt.add_item(str(grp[0]))
     rhythm_cat_opt.item_selected.connect(_on_rhythm_cat)
-    col.add_child(rhythm_cat_opt)
-
-    _mk_label(col, "Ритм:", 14)
+    cp.add_child(rhythm_cat_opt)
+    _mk_label(cp, "Ритм:", 13)
     rhythm_opt = OptionButton.new()
-    rhythm_opt.custom_minimum_size = Vector2(0, 42)
+    rhythm_opt.custom_minimum_size = Vector2(0, ROW_H)
     rhythm_opt.item_selected.connect(_on_rhythm)
-    _add_stepper(col, rhythm_opt, _step_rhythm)
+    _add_stepper(cp, rhythm_opt, _step_rhythm)
     _fill_rhythm_items(0)
 
-    _mk_label(col, "Блокада ножки:", 14)
-    bbb_opt = OptionButton.new()
-    bbb_opt.custom_minimum_size = Vector2(0, 42)
-    for n in BBB_NAMES:
-        bbb_opt.add_item(n)
-    bbb_opt.item_selected.connect(_on_bbb)
-    col.add_child(bbb_opt)
-
-    _mk_label(col, "Очаг ЖТ/ЖЭ (форма широкого комплекса):", 14)
-    focus_opt = OptionButton.new()
-    focus_opt.custom_minimum_size = Vector2(0, 42)
-    for n in FOCUS_NAMES:
-        focus_opt.add_item(n)
-    focus_opt.item_selected.connect(_on_focus)
-    col.add_child(focus_opt)
-
-    _mk_label(col, "Неисправность ЭКС (для режимов стимуляции):", 14)
-    pace_fault_opt = OptionButton.new()
-    pace_fault_opt.custom_minimum_size = Vector2(0, 42)
-    for n in PACE_FAULT_NAMES:
-        pace_fault_opt.add_item(n)
-    pace_fault_opt.item_selected.connect(_on_pace_fault)
-    col.add_child(pace_fault_opt)
-
-    _mk_label(col, "Желудочковые экстрасистолы (ЖЭ):", 14)
-    pvc_opt = OptionButton.new()
-    pvc_opt.custom_minimum_size = Vector2(0, 42)
-    for n in PVC_NAMES:
-        pvc_opt.add_item(n)
-    pvc_opt.item_selected.connect(_on_pvc)
-    col.add_child(pvc_opt)
-
-    _mk_label(col, "Реализм сигнала (живой монитор):", 14)
-    _add_artifact_check(col, "Дыхательная аритмия (вариабельность RR)", "resp_arr", 0.06, true)
-    _add_artifact_check(col, "Дрейф изолинии", "baseline_wander", 0.8, false)
-    _add_artifact_check(col, "Сетевая наводка 50 Гц", "mains_noise", 0.15, false)
-
-    export_btn = Button.new()
-    export_btn.text = "💾 Экспорт 12 отведений в PNG"
-    export_btn.custom_minimum_size = Vector2(0, 42)
-    export_btn.pressed.connect(_export_png)
-    col.add_child(export_btn)
-
+    # --- Карточка: монитор, ЧСС, отображение ---
+    var cm := _mk_card(col, "Монитор")
     rate_label = Label.new()
     rate_label.add_theme_font_size_override("font_size", 16)
-    col.add_child(rate_label)
+    cm.add_child(rate_label)
     rate_slider = HSlider.new()
     rate_slider.min_value = 30
     rate_slider.max_value = 220
@@ -592,18 +567,16 @@ func _build_monitor_tab(tabs: TabContainer) -> void:
     rate_slider.custom_minimum_size = Vector2(0, 40)
     rate_slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
     rate_slider.value_changed.connect(_on_rate)
-    col.add_child(rate_slider)
-
+    cm.add_child(rate_slider)
     monitor = MonitorView.new()
     monitor.custom_minimum_size = Vector2(0, 185)
     monitor.size_flags_horizontal = Control.SIZE_EXPAND_FILL
     monitor.clip_contents = true
-    col.add_child(monitor)
-
+    cm.add_child(monitor)
     var ctlrow := HBoxContainer.new()
     ctlrow.add_theme_constant_override("separation", 8)
     ctlrow.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-    col.add_child(ctlrow)
+    cm.add_child(ctlrow)
     monitor_speed_btn = Button.new()
     monitor_speed_btn.text = "Скорость: 25 мм/с"
     monitor_speed_btn.custom_minimum_size = Vector2(0, 38)
@@ -616,20 +589,28 @@ func _build_monitor_tab(tabs: TabContainer) -> void:
     theme_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
     theme_btn.pressed.connect(_cycle_theme)
     ctlrow.add_child(theme_btn)
+    export_btn = Button.new()
+    export_btn.text = "💾 Экспорт 12 отведений в PNG"
+    export_btn.custom_minimum_size = Vector2(0, BTN_H)
+    export_btn.pressed.connect(_export_png)
+    cm.add_child(export_btn)
 
+    # --- Карточка: неотложные действия ---
+    var ce := _mk_card(col, "Неотложные действия")
     var defib_btn := Button.new()
     defib_btn.text = "⚡ Разряд (дефибрилляция / кардиоверсия)"
-    defib_btn.custom_minimum_size = Vector2(0, 42)
+    defib_btn.custom_minimum_size = Vector2(0, BTN_H)
     defib_btn.pressed.connect(_defib)
-    col.add_child(defib_btn)
-    _add_artifact_check(col, "СЛР — компрессии грудной клетки (~110/мин)", "cpr", 7.0, false)
+    ce.add_child(defib_btn)
+    _add_artifact_check(ce, "СЛР — компрессии грудной клетки (~110/мин)", "cpr", 7.0, false)
 
+    # --- Карточка: правка кривой ---
+    var ced := _mk_card(col, "Правка кривой")
     edit_btn = Button.new()
     edit_btn.text = "✏ Редактировать кривую (сетка ЭКГ)"
-    edit_btn.custom_minimum_size = Vector2(0, 42)
+    edit_btn.custom_minimum_size = Vector2(0, BTN_H)
     edit_btn.pressed.connect(_toggle_edit)
-    col.add_child(edit_btn)
-
+    ced.add_child(edit_btn)
     edit_view = EditView.new()
     edit_view.custom_minimum_size = Vector2(0, 270)
     edit_view.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -637,15 +618,21 @@ func _build_monitor_tab(tabs: TabContainer) -> void:
     edit_view.visible = false
     edit_view.handle_dragged.connect(_on_edit_drag)
     edit_view.drag_ended.connect(_on_edit_release)
-    col.add_child(edit_view)
+    ced.add_child(edit_view)
 
-    _mk_label(col, "Отведения — нажми для выбора:", 14)
+    # --- Карточка: отведения ---
+    var cl := _mk_card(col, "Отведения")
+    lead_sel_label = Label.new()
+    lead_sel_label.add_theme_font_size_override("font_size", 13)
+    lead_sel_label.add_theme_color_override("font_color", Color(0.62, 0.82, 1.0))
+    cl.add_child(lead_sel_label)
+    _mk_label(cl, "Нажми миниатюру для выбора отведения:", 12)
     var grid := GridContainer.new()
     grid.columns = 3
     grid.add_theme_constant_override("h_separation", 6)
     grid.add_theme_constant_override("v_separation", 6)
     grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-    col.add_child(grid)
+    cl.add_child(grid)
     for i in LEADS.size():
         var lv := LeadView.new()
         lv.lead_name = LEADS[i]
@@ -657,59 +644,67 @@ func _build_monitor_tab(tabs: TabContainer) -> void:
         lead_views.append(lv)
 
 func _build_params_tab(tabs: TabContainer) -> void:
-    var sc := ScrollContainer.new()
-    sc.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-    tabs.add_child(sc)
-    tabs.set_tab_title(1, "Параметры")
-    var col := VBoxContainer.new()
-    col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-    col.add_theme_constant_override("separation", 9)
-    sc.add_child(col)
+    var col := _mk_tab(tabs, 1, "Параметры", 9)
 
-    _mk_label(col, "Отведение для правки:", 15)
-    lead_opt = OptionButton.new()
-    lead_opt.custom_minimum_size = Vector2(0, 42)
-    for nm in LEADS:
-        lead_opt.add_item(nm)
-    lead_opt.item_selected.connect(_on_lead_opt)
-    col.add_child(lead_opt)
+    # --- Карточка: правка выбранного отведения ---
+    var cle := _mk_card(col, "Правка отведения")
+    _mk_label(cle, "Отведение для правки:", 13)
+    lead_opt = _mk_option(cle, LEADS, _on_lead_opt)
+    _mk_label(cle, "В этом отведении (прочие следуют за вектором; ST → реципрокные):", 12)
+    _add_lead_amp(cle, "r_amp", "R", -30, 30, 0.5, "мм")
+    _add_lead_amp(cle, "t_amp", "T", -20, 20, 0.5, "мм")
+    _add_lead_amp(cle, "st", "ST", -8, 8, 0.1, "мм")
 
-    _mk_label(col, "— Правка в этом отведении (остальные следуют за вектором; ST → реципрокные) —", 12)
-    _add_lead_amp(col, "r_amp", "R", -30, 30, 0.5, "мм")
-    _add_lead_amp(col, "t_amp", "T", -20, 20, 0.5, "мм")
-    _add_lead_amp(col, "st", "ST", -8, 8, 0.1, "мм")
+    # --- Карточка: морфология (общая для всех отведений) ---
+    var cmo := _mk_card(col, "Морфология (все отведения)")
+    _add_param(cmo, params, "qrs_axis", "Ось QRS", -120, 180, 5, "°")
+    _add_param(cmo, params, "t_axis", "Ось T", -120, 180, 5, "°")
+    _add_param(cmo, params, "p_amp", "Зубец P", 0, 5, 0.1, "мм")
+    _add_param(cmo, params, "p_dur", "Длительность P", 40, 160, 5, "мс")
+    _add_param(cmo, params, "pr", "Интервал PR", 80, 320, 5, "мс")
+    _add_param(cmo, params, "q_amp", "Зубец Q", 0, 8, 0.1, "мм")
+    _add_param(cmo, params, "s_amp", "Зубец S", 0, 30, 0.5, "мм")
+    _add_param(cmo, params, "qrs_dur", "QRS (база проведения)", 40, 200, 5, "мс")
+    _add_param(cmo, params, "qt", "QT корриг. (база)", 200, 600, 10, "мс")
 
-    col.add_child(HSeparator.new())
-    _mk_label(col, "— Общее (одинаково во всех отведениях) —", 12)
-    _add_param(col, params, "qrs_axis", "Ось QRS", -120, 180, 5, "°")
-    _add_param(col, params, "t_axis", "Ось T", -120, 180, 5, "°")
-    _add_param(col, params, "p_amp", "Зубец P", 0, 5, 0.1, "мм")
-    _add_param(col, params, "p_dur", "Длительность P", 40, 160, 5, "мс")
-    _add_param(col, params, "pr", "Интервал PR", 80, 320, 5, "мс")
-    _add_param(col, params, "q_amp", "Зубец Q", 0, 8, 0.1, "мм")
-    _add_param(col, params, "s_amp", "Зубец S", 0, 30, 0.5, "мм")
-    _add_param(col, params, "qrs_dur", "QRS (база проведения)", 40, 200, 5, "мс")
-    _add_param(col, params, "qt", "QT корриг. (база)", 200, 600, 10, "мс")
+    # --- Карточка: проводимость и эктопия (перенесено с «Монитора») ---
+    var ccond := _mk_card(col, "Проводимость и эктопия")
+    _mk_label(ccond, "Блокада ножки:", 13)
+    bbb_opt = _mk_option(ccond, BBB_NAMES, _on_bbb)
+    _mk_label(ccond, "Очаг ЖТ/ЖЭ (форма широкого комплекса):", 13)
+    focus_opt = _mk_option(ccond, FOCUS_NAMES, _on_focus)
+    _mk_label(ccond, "Неисправность ЭКС (для режимов стимуляции):", 13)
+    pace_fault_opt = _mk_option(ccond, PACE_FAULT_NAMES, _on_pace_fault)
+    _mk_label(ccond, "Желудочковые экстрасистолы (ЖЭ):", 13)
+    pvc_opt = _mk_option(ccond, PVC_NAMES, _on_pvc)
 
-    col.add_child(HSeparator.new())
-    _mk_label(col, "Электролиты и АД", 15)
-    _add_param(col, state, "k", "Калий K⁺", 2.0, 9.0, 0.1, "ммоль/л")
-    _add_param(col, state, "ca", "Кальций Ca²⁺", 1.5, 3.5, 0.05, "ммоль/л")
-    _add_param(col, state, "mg", "Магний Mg²⁺", 0.3, 2.0, 0.05, "ммоль/л")
-    _add_param(col, state, "na", "Натрий Na⁺", 120, 160, 1, "ммоль/л")
-    _add_param(col, state, "bp_sys", "АД систолическое", 90, 220, 5, "мм рт.ст.")
-    _add_param(col, state, "bp_dia", "АД диастолическое", 50, 130, 5, "мм рт.ст.")
+    # --- Карточка: реализм сигнала (перенесено с «Монитора») ---
+    var csig := _mk_card(col, "Реализм сигнала")
+    _add_artifact_check(csig, "Дыхательная аритмия (вариабельность RR)", "resp_arr", 0.06, true)
+    _add_artifact_check(csig, "Дрейф изолинии", "baseline_wander", 0.8, false)
+    _add_artifact_check(csig, "Сетевая наводка 50 Гц", "mains_noise", 0.15, false)
 
+    # --- Карточка: электролиты и АД ---
+    var cel := _mk_card(col, "Электролиты и АД")
+    _add_param(cel, state, "k", "Калий K⁺", 2.0, 9.0, 0.1, "ммоль/л")
+    _add_param(cel, state, "ca", "Кальций Ca²⁺", 1.5, 3.5, 0.05, "ммоль/л")
+    _add_param(cel, state, "mg", "Магний Mg²⁺", 0.3, 2.0, 0.05, "ммоль/л")
+    _add_param(cel, state, "na", "Натрий Na⁺", 120, 160, 1, "ммоль/л")
+    _add_param(cel, state, "bp_sys", "АД систолическое", 90, 220, 5, "мм рт.ст.")
+    _add_param(cel, state, "bp_dia", "АД диастолическое", 50, 130, 5, "мм рт.ст.")
+
+    # --- Карточка: сброс ---
+    var crb := _mk_card(col)
     var rm := Button.new()
     rm.text = "Норма морфологии"
     rm.custom_minimum_size = Vector2(0, 44)
     rm.pressed.connect(_reset_keys.bind(DEFAULTS, true))
-    col.add_child(rm)
+    crb.add_child(rm)
     var rs := Button.new()
     rs.text = "Норма электролитов / АД"
     rs.custom_minimum_size = Vector2(0, 44)
     rs.pressed.connect(_reset_keys.bind(STATE_DEFAULTS, false))
-    col.add_child(rs)
+    crb.add_child(rs)
 
 func _drug_index(dname: String) -> int:
     for i in DRUGS.size():
@@ -742,14 +737,7 @@ func _add_drug_row(col: Node, i: int) -> void:
     col.add_child(dl)
 
 func _build_drugs_tab(tabs: TabContainer) -> void:
-    var sc := ScrollContainer.new()
-    sc.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-    tabs.add_child(sc)
-    tabs.set_tab_title(2, "Препараты")
-    var col := VBoxContainer.new()
-    col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-    col.add_theme_constant_override("separation", 4)
-    sc.add_child(col)
+    var col := _mk_tab(tabs, 2, "Препараты", 4)
 
     _mk_label(col, "Доза каждого препарата (эффекты суммируются):", 14)
     drug_opts.resize(DRUGS.size())
@@ -773,31 +761,70 @@ func _build_drugs_tab(tabs: TabContainer) -> void:
     col.add_child(drug_summary)
 
 func _build_analysis_tab(tabs: TabContainer) -> void:
-    var sc := ScrollContainer.new()
-    sc.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-    tabs.add_child(sc)
-    tabs.set_tab_title(3, "Анализ")
-    var col := VBoxContainer.new()
-    col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-    col.add_theme_constant_override("separation", 8)
-    sc.add_child(col)
+    var col := _mk_tab(tabs, 3, "Анализ", 8)
 
-    _mk_label(col, "Дифференциальный диагноз (оценка вероятности):", 15)
+    # Подробное заключение + критерии Сгарбоссы (перенесено из шапки — экономим вертикаль).
+    var crep := _mk_card(col, "Заключение")
+    report_label = Label.new()
+    report_label.add_theme_font_size_override("font_size", 13)
+    report_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+    report_label.modulate = Color(0.82, 0.87, 0.92)
+    crep.add_child(report_label)
+    prob_label = Label.new()
+    prob_label.add_theme_font_size_override("font_size", 14)
+    prob_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+    crep.add_child(prob_label)
+
+    var cdiff := _mk_card(col, "Дифференциальный диагноз")
     diff_label = Label.new()
     diff_label.add_theme_font_size_override("font_size", 15)
     diff_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-    col.add_child(diff_label)
-    col.add_child(HSeparator.new())
+    cdiff.add_child(diff_label)
 
+    var cax := _mk_card(col, "Электрическая ось")
     axis_view = AxisView.new()
     axis_view.custom_minimum_size = Vector2(0, 300)
     axis_view.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-    col.add_child(axis_view)
-
+    cax.add_child(axis_view)
     analysis_label = Label.new()
     analysis_label.add_theme_font_size_override("font_size", 15)
     analysis_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-    col.add_child(analysis_label)
+    cax.add_child(analysis_label)
+
+# Каркас вкладки: ScrollContainer (верт. прокрутка) → VBox. Возвращает VBox для контента.
+func _mk_tab(tabs: TabContainer, idx: int, title: String, sep: int = 8) -> VBoxContainer:
+    var sc := ScrollContainer.new()
+    sc.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+    tabs.add_child(sc)
+    tabs.set_tab_title(idx, title)
+    var col := VBoxContainer.new()
+    col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    col.add_theme_constant_override("separation", sep)
+    sc.add_child(col)
+    return col
+
+# Карточка-секция: PanelContainer (стилизуется темой) → VBox. Группирует контролы визуально.
+func _mk_card(parent: Node, title: String = "", sep: int = 8) -> VBoxContainer:
+    var pc := PanelContainer.new()
+    pc.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    var v := VBoxContainer.new()
+    v.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    v.add_theme_constant_override("separation", sep)
+    pc.add_child(v)
+    parent.add_child(pc)
+    if title != "":
+        _mk_label(v, title, 14)
+    return v
+
+# Выпадающий список с пунктами и обработчиком (устраняет повтор шаблона).
+func _mk_option(parent: Node, names: Array, cb: Callable, h: int = ROW_H) -> OptionButton:
+    var ob := OptionButton.new()
+    ob.custom_minimum_size = Vector2(0, h)
+    for n in names:
+        ob.add_item(str(n))
+    ob.item_selected.connect(cb)
+    parent.add_child(ob)
+    return ob
 
 func _mk_label(parent: Node, text: String, fs: int) -> void:
     var hb := HBoxContainer.new()
@@ -1016,14 +1043,7 @@ func _step_rhythm(dir: int) -> void:
 
 # ---------- Викторина «угадай диагноз» ----------
 func _build_quiz_tab(tabs: TabContainer) -> void:
-    var sc := ScrollContainer.new()
-    sc.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-    tabs.add_child(sc)
-    tabs.set_tab_title(5, "Викторина")
-    var col := VBoxContainer.new()
-    col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-    col.add_theme_constant_override("separation", 8)
-    sc.add_child(col)
+    var col := _mk_tab(tabs, 5, "Викторина", 8)
 
     quiz_score_label = Label.new()
     quiz_score_label.add_theme_font_size_override("font_size", 16)
@@ -1288,14 +1308,7 @@ func _quiz_answer(i: int) -> void:
     _save_settings()
 
 func _build_stress_tab(tabs: TabContainer) -> void:
-    var sc := ScrollContainer.new()
-    sc.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-    tabs.add_child(sc)
-    tabs.set_tab_title(4, "Проба")
-    var col := VBoxContainer.new()
-    col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-    col.add_theme_constant_override("separation", 8)
-    sc.add_child(col)
+    var col := _mk_tab(tabs, 4, "Проба", 8)
 
     _mk_label(col, "Нагрузочная проба (тредмил/велоэргометр):", 15)
     stress_age_label = Label.new()
@@ -1730,6 +1743,14 @@ func _refresh_views() -> void:
     if rate_slider:
         rate_slider.set_value_no_signal(float(params["hr"]))
         rate_label.text = "Частота (ЧСС):  %d уд/мин" % roundi(float(params["hr"]))
+    # Подсветка выбранного отведения в сетке миниатюр + подпись.
+    for j in lead_views.size():
+        var hl := (j == selected_lead)
+        if lead_views[j].highlighted != hl:
+            lead_views[j].highlighted = hl
+            lead_views[j].queue_redraw()
+    if lead_sel_label:
+        lead_sel_label.text = "Выбрано отведение:  %s" % LEADS[selected_lead]
 
 func _defib() -> void:
     if not _built or _last_eff.is_empty():
@@ -2027,55 +2048,7 @@ func _recompute() -> void:
 
     var primary_dx: String
     var primary_conf: float
-    if rhythm == "afib":
-        primary_dx = "Фибрилляция предсердий"
-        primary_conf = 0.9
-    elif rhythm == "aflutter":
-        primary_dx = "Трепетание предсердий (волны F)"
-        primary_conf = 0.92
-    elif rhythm == "vtach":
-        primary_dx = "Желудочковая тахикардия"
-        primary_conf = 0.95
-    elif rhythm == "torsades":
-        primary_dx = "Тахикардия пируэт (Torsades)"
-        primary_conf = 0.95
-    elif rhythm == "bidirectional":
-        primary_dx = "Двунаправленная ЖТ (дигоксиновая интоксикация)"
-        primary_conf = 0.93
-    elif rhythm == "avnrt":
-        primary_dx = "АВУРТ (узловая тахикардия)"
-        primary_conf = 0.9
-    elif rhythm == "junctional":
-        primary_dx = "Узловой (АВ-узловой) ритм"
-        primary_conf = 0.88
-    elif rhythm == "aivr":
-        primary_dx = "Ускоренный идиовентрикулярный ритм (AIVR)"
-        primary_conf = 0.88
-    elif rhythm == "sss":
-        primary_dx = "СССУ (синусовые паузы)"
-        primary_conf = 0.88
-    elif rhythm == "wenckebach":
-        primary_dx = "AV-блокада 2 ст. Мобитц I (Венкебах)"
-        primary_conf = 0.9
-    elif rhythm == "mobitz2":
-        primary_dx = "AV-блокада 2 ст. Мобитц II"
-        primary_conf = 0.9
-    elif rhythm == "av3":
-        primary_dx = "Полная AV-блокада (диссоциация)"
-        primary_conf = 0.9
-    elif rhythm == "vfib":
-        primary_dx = "ФИБРИЛЛЯЦИЯ ЖЕЛУДОЧКОВ — остановка кровообращения"
-        primary_conf = 0.98
-    elif rhythm == "vfib_fine":
-        primary_dx = "Мелковолновая ФЖ — остановка кровообращения"
-        primary_conf = 0.9
-    elif rhythm == "pea":
-        primary_dx = "ЭМД / PEA — электрическая активность без пульса"
-        primary_conf = 0.95
-    elif rhythm == "asystole":
-        primary_dx = "АСИСТОЛИЯ — остановка кровообращения"
-        primary_conf = 0.97
-    elif rhythm == "pace_vvi":
+    if rhythm == "pace_vvi":
         var pf := str(params.get("pace_fault", "none"))
         if pf == "loss_capture":
             primary_dx = "ЭКС (VVI): потеря захвата — спайки без QRS"
@@ -2084,15 +2057,9 @@ func _recompute() -> void:
         else:
             primary_dx = "ЭКС: желудочковая стимуляция (VVI)"
         primary_conf = 0.92
-    elif rhythm == "pace_aai":
-        primary_dx = "ЭКС: предсердная стимуляция (AAI)"
-        primary_conf = 0.92
-    elif rhythm == "pace_ddd":
-        primary_dx = "ЭКС: двухкамерная стимуляция (DDD)"
-        primary_conf = 0.92
-    elif rhythm == "pace_biv":
-        primary_dx = "ЭКС: бивентрикулярная стимуляция (BiV/CRT)"
-        primary_conf = 0.92
+    elif RHYTHM_DX.has(rhythm):
+        primary_dx = str(RHYTHM_DX[rhythm][0])
+        primary_conf = float(RHYTHM_DX[rhythm][1])
     elif ed["dx"] != "":
         primary_dx = ed["dx"]
         primary_conf = ed["conf"]
@@ -2153,6 +2120,11 @@ func _recompute() -> void:
     elif abn >= 0.45: pcol = Color(1.0, 0.55, 0.1)
     elif abn >= 0.2: pcol = Color(0.95, 0.85, 0.2)
     prob_label.add_theme_color_override("font_color", pcol)
+
+    if vitals_label:  # компактная плашка витальных в шапке
+        vitals_label.text = "ЧСС %d  ·  ось %d° (%s)  ·  QTc %d мс  ·  патология %d%%" % [
+            roundi(float(eff.get("hr", 0.0))), roundi(axis), axis_lbl,
+            roundi(float(res["qtc"])), roundi(abn * 100.0)]
 
     var dtext := ""
     if diff.is_empty():
