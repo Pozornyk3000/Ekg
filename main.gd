@@ -11,7 +11,7 @@ const DEFAULTS := {
     "resp_arr": 0.06, "baseline_wander": 0.0, "mains_noise": 0.0, "cpr": 0.0,
     "st_shape": 0.0, "p_morph": "normal",
     "delta_amp": 0.0, "j_wave": 0.0, "t_post": 0.0, "pr_dep": 0.0, "strain": 0.0, "rv_boost": 0.0,
-    "hemiblock": "none", "ashman": false, "alternans": 0.0,
+    "hemiblock": "none", "ashman": false, "alternans": 0.0, "twa": 0.0,
 }
 const STATE_DEFAULTS := {
     "k": 4.0, "ca": 2.4, "mg": 0.85, "na": 140.0,
@@ -170,6 +170,7 @@ const PRESETS := [
     {"name": "Гипотермия (волны Осборна)", "p": {"j_wave": 2.8, "hr": 45.0, "qt": 440.0}, "s": {}},
     {"name": "Гиперкальциемия (короткий QT)", "p": {}, "s": {"ca": 3.2}},
     {"name": "Электрическая альтернация (тампонада)", "p": {"hr": 115.0, "alternans": 0.85, "r_amp": 7.0, "s_amp": 3.0}, "s": {"bp_sys": 92.0}},
+    {"name": "T-волновая альтернация (риск аритмий)", "p": {"twa": 0.7, "qt": 480.0}, "s": {}},
 ]
 
 var params := DEFAULTS.duplicate(true)
@@ -183,6 +184,7 @@ var _last_eff: Dictionary = {}
 var edit_view: EditView
 var edit_btn: Button
 var measure_btn: Button
+var freeze_btn: Button
 var edit_mode := false
 var _edit_feat := ""        # текущий перетаскиваемый маркер (для относительной правки времени)
 var _edit_t0 := 0.0         # точка захвата по времени, мс
@@ -591,6 +593,11 @@ func _build_monitor_tab(tabs: TabContainer) -> void:
     theme_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
     theme_btn.pressed.connect(_cycle_theme)
     ctlrow.add_child(theme_btn)
+    freeze_btn = Button.new()
+    freeze_btn.text = "⏸ Стоп-кадр + линейка"
+    freeze_btn.custom_minimum_size = Vector2(0, BTN_H)
+    freeze_btn.pressed.connect(_toggle_freeze)
+    cm.add_child(freeze_btn)
     export_btn = Button.new()
     export_btn.text = "💾 Экспорт 12 отведений в PNG"
     export_btn.custom_minimum_size = Vector2(0, BTN_H)
@@ -674,6 +681,7 @@ func _build_params_tab(tabs: TabContainer) -> void:
     _add_param(cmo, params, "qrs_dur", "QRS (база проведения)", 40, 200, 5, "мс")
     _add_param(cmo, params, "qt", "QT корриг. (база)", 200, 600, 10, "мс")
     _add_param(cmo, params, "alternans", "Электрическая альтернация", 0, 1, 0.05, "")
+    _add_param(cmo, params, "twa", "T-альтернация (риск аритмий)", 0, 1, 0.05, "")
 
     # --- Карточка: проводимость и эктопия (перенесено с «Монитора») ---
     var ccond := _mk_card(col, "Проводимость и эктопия")
@@ -1628,6 +1636,14 @@ func _toggle_edit() -> void:
     if edit_mode:
         _refresh_edit()
 
+# Стоп-кадр монитора + линейка (калиперы на замороженной развёртке).
+func _toggle_freeze() -> void:
+    if not monitor:
+        return
+    monitor.frozen = not monitor.frozen
+    freeze_btn.text = "▶ Продолжить развёртку" if monitor.frozen else "⏸ Стоп-кадр + линейка"
+    monitor.queue_redraw()
+
 # Линейка: показать сетку с кривой и переключить правку↔измерение.
 func _toggle_measure() -> void:
     if not edit_view:
@@ -1898,6 +1914,11 @@ func _effective_params() -> Dictionary:
         e["r_amp"] = float(e["r_amp"]) + d * 3.0
         e["s_amp"] = float(e["s_amp"]) + d * 2.0
 
+    # Рейт-зависимость PR: АВ-проведение слегка ускоряется при тахикардии и замедляется
+    # при брадикардии (вегетативный тонус). Мягкий эффект вокруг ЧСС 75; не для ЭКС.
+    if not str(e.get("rhythm", "sinus")).begins_with("pace"):
+        e["pr"] = float(e["pr"]) - (float(e["hr"]) - 75.0) * 0.22
+
     var rr_sec := 60.0 / clampf(float(e["hr"]), 20.0, 300.0)
     e["qtc"] = clampf(float(e["qt"]), 240.0, 700.0)
     e["qt"] = clampf(float(e["qtc"]) * sqrt(rr_sec), 180.0, 700.0)
@@ -1966,6 +1987,8 @@ func _explain(eff: Dictionary, es: Dictionary, sok: Dictionary) -> String:
     var pmorph := str(eff.get("p_morph", "normal"))
     if float(eff.get("alternans", 0.0)) > 0.4:
         return "Как отличить: амплитуда QRS чередуется от удара к удару + синусовая тахикардия, низкий вольтаж · Почему: сердце качается в перикардиальном выпоте (электрическая альтернация → тампонада)."
+    if float(eff.get("twa", 0.0)) > 0.3:
+        return "Как отличить: амплитуда зубца T чередуется через удар (QRS стабилен) · Почему: негомогенная реполяризация — маркер электрической нестабильности и риска ЖТ/ФЖ."
     if delta > 0.05 and pr < 120.0:
         return "Как отличить: короткий PR + дельта-волна (плавный наклон в начале QRS) · Почему: дополнительный путь (пучок Кента) проводит в обход АВ-узла (WPW)."
     if pr_dep > 0.1:

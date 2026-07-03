@@ -22,6 +22,12 @@ var _rpeaks := {}
 var _oneshot := false
 var _steady := PackedFloat32Array()
 
+# Заморозка + линейка: пауза развёртки и две каретки для измерения интервала/ЧСС.
+var frozen := false
+var cal_a := 0.30
+var cal_b := 0.55
+var _drag_cal := ""
+
 func update_samples(buf: PackedFloat32Array) -> void:
     samples = buf
     _oneshot = false
@@ -55,6 +61,8 @@ func _detect_peaks() -> void:
             last = i
 
 func _process(delta: float) -> void:
+    if frozen:
+        return
     if samples.size() > 1:
         head += SAMPLES_PER_S * delta
         if _oneshot and head >= float(samples.size()):
@@ -122,6 +130,40 @@ func _draw() -> void:
         draw_rect(Rect2(2, 2, w - 4, h - 4), Color(1.0, 0.27, 0.22, puls), false, 4.0)
         var aw := f.get_string_size(alarm_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 16).x
         draw_string(f, Vector2((w - aw) * 0.5, 22), alarm_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(1.0, 0.45, 0.4, 0.6 + 0.4 * puls))
+
+    if frozen:
+        var xa := cal_a * w
+        var xb := cal_b * w
+        var cc := Color(0.55, 1.0, 0.75)
+        draw_rect(Rect2(minf(xa, xb), 0, absf(xb - xa), h), Color(cc, 0.10))
+        for xc in [xa, xb]:
+            draw_line(Vector2(xc, 0), Vector2(xc, h), cc, 1.6)
+            draw_circle(Vector2(xc, 9), 6.0, cc)
+        var dt := absf(cal_b - cal_a) * w / PX_PER_MM / maxf(mm_per_s, 1.0) * 1000.0
+        var bpm := 60000.0 / dt if dt > 1.0 else 0.0
+        var txt := "📏  Δt = %d мс   ·   ЧСС = %d/мин" % [int(round(dt)), int(round(bpm))]
+        draw_rect(Rect2(6, h - 30, w - 12, 22), Color(0.0, 0.15, 0.1, 0.55))
+        draw_string(f, Vector2(12, h - 14), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 15, cc)
+
+func _gui_input(event: InputEvent) -> void:
+    if not frozen:
+        return
+    var w := maxf(size.x, 1.0)
+    if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
+        if event.pressed:
+            _drag_cal = "a" if absf(event.position.x - cal_a * w) <= absf(event.position.x - cal_b * w) else "b"
+        else:
+            _drag_cal = ""
+        accept_event()
+    elif event is InputEventScreenTouch:
+        _drag_cal = ("a" if absf(event.position.x - cal_a * w) <= absf(event.position.x - cal_b * w) else "b") if event.pressed else ""
+        accept_event()
+    elif (event is InputEventMouseMotion or event is InputEventScreenDrag) and _drag_cal != "":
+        var fr := clampf(event.position.x / w, 0.0, 1.0)
+        if _drag_cal == "a": cal_a = fr
+        else: cal_b = fr
+        queue_redraw()
+        accept_event()
 
 func _draw_seg(i0: int, i1: int, nshow: int, sweep: int, n: int, w: float, mid: float) -> void:
     if i1 <= i0:

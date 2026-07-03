@@ -763,10 +763,12 @@ static func _build_beatsets(p: Dictionary, ev: Dictionary) -> Dictionary:
             qeff_out = maxf(qeff_out, float(bcb["qeff"]))
         for bi in range(vent.size()):
             idx.append(bi % 2)
-    elif float(p.get("alternans", 0.0)) > 0.0 and rhythm == "sinus" and float(p.get("pvc_rate", 0.0)) <= 0.0:
-        # Электрическая альтернация (перикардиальный выпот/тампонада): сердце качается в
-        # жидкости → амплитуда QRS-T чередуется через удар + лёгкое качание оси.
-        var amp := clampf(float(p["alternans"]), 0.0, 1.0)
+    elif (float(p.get("alternans", 0.0)) > 0.0 or float(p.get("twa", 0.0)) > 0.0) and rhythm == "sinus" and float(p.get("pvc_rate", 0.0)) <= 0.0:
+        # Альтернация через удар: электрическая (alternans, QRS-T + качание оси —
+        # перикардиальный выпот/тампонада) и/или T-волновая (twa, только зубец T —
+        # маркер электрической нестабильности/риска аритмий).
+        var amp := clampf(float(p.get("alternans", 0.0)), 0.0, 1.0)
+        var twa := clampf(float(p.get("twa", 0.0)), 0.0, 1.0)
         var akind := str(p.get("bbb", "none"))
         akind = akind if (akind == "lbbb" or akind == "rbbb") else "n"
         for variant in 2:
@@ -775,7 +777,7 @@ static func _build_beatsets(p: Dictionary, ev: Dictionary) -> Dictionary:
                 pv["r_amp"] = float(p["r_amp"]) * (1.0 - 0.5 * amp)
                 pv["s_amp"] = float(p["s_amp"]) * (1.0 - 0.5 * amp)
                 pv["q_amp"] = float(p["q_amp"]) * (1.0 - 0.5 * amp)
-                pv["t_amp"] = float(p["t_amp"]) * (1.0 - 0.4 * amp)
+                pv["t_amp"] = float(p["t_amp"]) * (1.0 - 0.4 * amp - 0.7 * twa)
                 pv["qrs_axis"] = float(p["qrs_axis"]) + 12.0 * amp
             var bca := _beat_components(pv, akind)
             sets.append(bca)
