@@ -20,6 +20,12 @@ var _baseline := 0.0
 var _handles: Array = []     # {feature, pos:Vector2, value:float}
 var _drag := ""
 
+# Режим «линейка»: две вертикальные каретки для измерения интервала/ЧСС/амплитуды.
+var measure_mode := false
+var cal_a := 0.30            # доли ширины (0..1)
+var cal_b := 0.58
+var _drag_cal := ""
+
 func _ready() -> void:
     custom_minimum_size = Vector2(0, 270)
 
@@ -69,22 +75,50 @@ func _draw() -> void:
         pts.append(Vector2(px, _baseline - samples[i] * PX_PER_MM))
     draw_polyline(pts, Color(0.10, 0.10, 0.13), 1.7, true)
 
-    _build_handles(nshow, w)
     var f := ThemeDB.fallback_font
-    for hd in _handles:
-        var p: Vector2 = hd["pos"]
-        draw_circle(p, 10.0, Color(0.15, 0.45, 0.85, 0.28))
-        draw_circle(p, 5.5, Color(0.10, 0.38, 0.78))
-        draw_arc(p, 10.0, 0.0, TAU, 22, Color(0.10, 0.38, 0.78), 1.8)
-        draw_string(f, Vector2(p.x + 12, p.y - 9), hd["feature"], HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.10, 0.20, 0.45))
+    if measure_mode:
+        _draw_calipers(w, h, nshow, f)
+    else:
+        _build_handles(nshow, w)
+        for hd in _handles:
+            var p: Vector2 = hd["pos"]
+            draw_circle(p, 10.0, Color(0.15, 0.45, 0.85, 0.28))
+            draw_circle(p, 5.5, Color(0.10, 0.38, 0.78))
+            draw_arc(p, 10.0, 0.0, TAU, 22, Color(0.10, 0.38, 0.78), 1.8)
+            draw_string(f, Vector2(p.x + 12, p.y - 9), hd["feature"], HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.10, 0.20, 0.45))
 
     _draw_labels(w, h)
+
+func _cal_sample(frac: float, nshow: int) -> float:
+    var idx := clampi(int(round(frac * float(maxi(nshow - 1, 1)))), 0, samples.size() - 1)
+    return samples[idx]
+
+func _draw_calipers(w: float, h: float, nshow: int, f) -> void:
+    var xa := cal_a * w
+    var xb := cal_b * w
+    var col := Color(0.10, 0.45, 0.30)
+    draw_rect(Rect2(minf(xa, xb), 0, absf(xb - xa), h), Color(0.15, 0.6, 0.4, 0.10))
+    for xc in [xa, xb]:
+        draw_line(Vector2(xc, 0), Vector2(xc, h), col, 1.6)
+        draw_circle(Vector2(xc, 8), 6.0, col)
+    var va := _cal_sample(cal_a, nshow)
+    var vb := _cal_sample(cal_b, nshow)
+    draw_circle(Vector2(xa, _baseline - va * PX_PER_MM), 4.0, Color(0.85, 0.2, 0.2))
+    draw_circle(Vector2(xb, _baseline - vb * PX_PER_MM), 4.0, Color(0.85, 0.2, 0.2))
+    var dt := absf(cal_b - cal_a) * _win_ms()
+    var hr := 60000.0 / dt if dt > 1.0 else 0.0
+    var damp := absf(vb - va)
+    var txt := "Δt = %d мс   ·   ЧСС = %d/мин   ·   ΔU = %.1f мм (%.2f мВ)" % [
+        int(round(dt)), int(round(hr)), damp, damp * 0.1]
+    draw_rect(Rect2(4, h - 44, w - 8, 22), Color(0.1, 0.35, 0.25, 0.14))
+    draw_string(f, Vector2(10, h - 28), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.08, 0.35, 0.22))
 
 func _draw_labels(_w: float, h: float) -> void:
     var f := ThemeDB.fallback_font
     draw_string(f, Vector2(7, 17), lead_name, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(0.10, 0.10, 0.10))
-    draw_string(f, Vector2(7, h - 7), "25 мм/с · 10 мм/мВ — тяни маркеры P/Q/R/S/T/ST: вверх-вниз = амплитуда, влево-вправо = время",
-        HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.45, 0.20, 0.20))
+    var hint := "25 мм/с · 10 мм/мВ — тяни каретки-линейки для измерения интервала/ЧСС/амплитуды" if measure_mode \
+        else "25 мм/с · 10 мм/мВ — тяни маркеры P/Q/R/S/T/ST: вверх-вниз = амплитуда, влево-вправо = время"
+    draw_string(f, Vector2(7, h - 7), hint, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.45, 0.20, 0.20))
 
 func _build_handles(nshow: int, w: float) -> void:
     _handles.clear()
@@ -163,6 +197,23 @@ func _gui_input(event: InputEvent) -> void:
         pos = event.position
         moving = true
     else:
+        return
+
+    # Режим линейки: тянем ближайшую каретку, параметры не меняем (только измерение).
+    if measure_mode:
+        var w := maxf(size.x, 1.0)
+        if pressed:
+            _drag_cal = "a" if absf(pos.x - cal_a * w) <= absf(pos.x - cal_b * w) else "b"
+            accept_event()
+        elif released:
+            _drag_cal = ""
+            accept_event()
+        elif moving and _drag_cal != "":
+            var fr := clampf(pos.x / w, 0.0, 1.0)
+            if _drag_cal == "a": cal_a = fr
+            else: cal_b = fr
+            queue_redraw()
+            accept_event()
         return
 
     if pressed:

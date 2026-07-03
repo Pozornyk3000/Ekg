@@ -55,6 +55,14 @@ static func _g(t: float, c: float, sigma: float) -> float:
     var d := t - c
     return exp(-(d * d) / (2.0 * sigma * sigma))
 
+# Асимметричный «полугауссиан»: своя сигма слева (подъём) и справа (спад) от центра.
+# Нормальный зубец T асимметричен — пологий восходящий и крутой нисходящий колена;
+# потеря асимметрии (симметричный T) — признак ишемии.
+static func _ga(t: float, c: float, s_left: float, s_right: float) -> float:
+    var s := s_left if t < c else s_right
+    var d := t - c
+    return exp(-(d * d) / (2.0 * s * s))
+
 static func _plateau(t: float, a: float, b: float) -> float:
     if t <= a or t >= b: return 0.0
     var e := 12.0
@@ -680,7 +688,12 @@ static func _beat_components(p: Dictionary, kind: String) -> Dictionary:
         # вектора в отведениях с высоким R (ГЛЖ: I/aVL/V5-V6; ГПЖ: V1-V3).
         tdir = -_u(Vector3(cos(a), sin(a), 0.30))
         tamp = maxf(tamp * 0.5, strain)
-    comps.append({"v": tdir * tamp, "c": t_pk, "s": t_sig})
+    # Нормальный T асимметричен (пологий подъём, крутой спад). При ишемии/перегрузке
+    # (t_post, strain, блок) T симметричен — это клинически значимо (Wellens и т.п.).
+    var t_s2 := t_sig
+    if kind == "n" and block < 0 and strain <= 0.0:
+        t_s2 = t_sig * 0.68
+    comps.append({"v": tdir * tamp, "c": t_pk, "s": t_sig, "s2": t_s2})
     if block == 1:
         # ПНПГ: вторичная дискордантная инверсия T в правых грудных (V1-V3) —
         # вектор кзади (+Z), противоположно терминальным силам ПЖ; лимб/V6 не трогает.
@@ -784,7 +797,7 @@ static func _render_one(p: Dictionary, lead: int, ev: Dictionary, bs: Dictionary
     for st in bs["sets"]:
         var arr: Array = []
         for c in st["comps"]:
-            arr.append({"a": lv.dot(c["v"]), "c": c["c"], "s": c["s"]})
+            arr.append({"a": lv.dot(c["v"]), "c": c["c"], "s": c["s"], "s2": c.get("s2", c["s"])})
         setproj.append({"comps": arr, "j": st["j"], "t_on": st["t_on"]})
 
     var buf := PackedFloat32Array()
@@ -834,7 +847,7 @@ static func _render_one(p: Dictionary, lead: int, ev: Dictionary, bs: Dictionary
             if tau2 < -40.0: break
             var sp: Dictionary = setproj[idx[ei]]
             for cc in sp["comps"]:
-                v += cc["a"] * _g(tau2, cc["c"], cc["s"])
+                v += cc["a"] * _ga(tau2, cc["c"], cc["s"], cc["s2"])
             if retro_p:
                 v += retro_proj * _g(tau2, sp["j"] - 8.0, 9.0)  # ретроградный P у конца QRS
             var pl := _plateau(tau2, sp["j"], sp["t_on"])

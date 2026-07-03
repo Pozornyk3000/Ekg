@@ -181,6 +181,7 @@ var selected_lead := 1
 var _last_eff: Dictionary = {}
 var edit_view: EditView
 var edit_btn: Button
+var measure_btn: Button
 var edit_mode := false
 var _edit_feat := ""        # текущий перетаскиваемый маркер (для относительной правки времени)
 var _edit_t0 := 0.0         # точка захвата по времени, мс
@@ -611,6 +612,11 @@ func _build_monitor_tab(tabs: TabContainer) -> void:
     edit_btn.custom_minimum_size = Vector2(0, BTN_H)
     edit_btn.pressed.connect(_toggle_edit)
     ced.add_child(edit_btn)
+    measure_btn = Button.new()
+    measure_btn.text = "📏 Линейка (измерить интервал/ЧСС)"
+    measure_btn.custom_minimum_size = Vector2(0, BTN_H)
+    measure_btn.pressed.connect(_toggle_measure)
+    ced.add_child(measure_btn)
     edit_view = EditView.new()
     edit_view.custom_minimum_size = Vector2(0, 270)
     edit_view.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -1619,6 +1625,16 @@ func _toggle_edit() -> void:
     edit_btn.text = "▶ Вернуть монитор" if edit_mode else "✏ Редактировать кривую (сетка ЭКГ)"
     if edit_mode:
         _refresh_edit()
+
+# Линейка: показать сетку с кривой и переключить правку↔измерение.
+func _toggle_measure() -> void:
+    if not edit_view:
+        return
+    if not edit_mode:            # линейке нужна раскрытая кривая — включаем её
+        _toggle_edit()
+    edit_view.measure_mode = not edit_view.measure_mode
+    measure_btn.text = "✏ Вернуть правку маркерами" if edit_view.measure_mode else "📏 Линейка (измерить интервал/ЧСС)"
+    edit_view.queue_redraw()
 
 func _refresh_edit() -> void:
     if edit_view == null or not edit_mode:
