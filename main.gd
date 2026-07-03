@@ -11,7 +11,7 @@ const DEFAULTS := {
     "resp_arr": 0.06, "baseline_wander": 0.0, "mains_noise": 0.0, "cpr": 0.0,
     "st_shape": 0.0, "p_morph": "normal",
     "delta_amp": 0.0, "j_wave": 0.0, "t_post": 0.0, "pr_dep": 0.0, "strain": 0.0, "rv_boost": 0.0,
-    "hemiblock": "none", "ashman": false,
+    "hemiblock": "none", "ashman": false, "alternans": 0.0,
 }
 const STATE_DEFAULTS := {
     "k": 4.0, "ca": 2.4, "mg": 0.85, "na": 140.0,
@@ -169,6 +169,7 @@ const PRESETS := [
     {"name": "ТЭЛА (перегрузка ПЖ: тахи, RAD, T V1-V3)", "p": {"hr": 110.0, "qrs_axis": 100.0, "t_post": 4.0, "strain": 2.5}, "s": {}},
     {"name": "Гипотермия (волны Осборна)", "p": {"j_wave": 2.8, "hr": 45.0, "qt": 440.0}, "s": {}},
     {"name": "Гиперкальциемия (короткий QT)", "p": {}, "s": {"ca": 3.2}},
+    {"name": "Электрическая альтернация (тампонада)", "p": {"hr": 115.0, "alternans": 0.85, "r_amp": 7.0, "s_amp": 3.0}, "s": {"bp_sys": 92.0}},
 ]
 
 var params := DEFAULTS.duplicate(true)
@@ -672,6 +673,7 @@ func _build_params_tab(tabs: TabContainer) -> void:
     _add_param(cmo, params, "s_amp", "Зубец S", 0, 30, 0.5, "мм")
     _add_param(cmo, params, "qrs_dur", "QRS (база проведения)", 40, 200, 5, "мс")
     _add_param(cmo, params, "qt", "QT корриг. (база)", 200, 600, 10, "мс")
+    _add_param(cmo, params, "alternans", "Электрическая альтернация", 0, 1, 0.05, "")
 
     # --- Карточка: проводимость и эктопия (перенесено с «Монитора») ---
     var ccond := _mk_card(col, "Проводимость и эктопия")
@@ -929,7 +931,7 @@ func _preset_group(pr: Dictionary) -> String:
         return "mi"
     if rh.begins_with("pace") or "ЭКС" in n or "CRT" in n:
         return "pace"
-    if "калиемия" in n or "кальциемия" in n or "WPW" in n or "P-" in n or "еполяриз" in n or "потермия" in n or "Осборн" in n:
+    if "калиемия" in n or "кальциемия" in n or "WPW" in n or "P-" in n or "еполяриз" in n or "потермия" in n or "Осборн" in n or "льтернаци" in n or "ампонад" in n:
         return "synd"
     if rh != "sinus" or "ахикардия" in n or "радикардия" in n or "СССУ" in n or "Асистол" in n or "ЭМД" in n or "ФЖ" in n:
         return "arr"
@@ -1962,6 +1964,8 @@ func _explain(eff: Dictionary, es: Dictionary, sok: Dictionary) -> String:
     var pr := float(eff.get("pr", 160.0))
     var hr := float(eff.get("hr", 75.0))
     var pmorph := str(eff.get("p_morph", "normal"))
+    if float(eff.get("alternans", 0.0)) > 0.4:
+        return "Как отличить: амплитуда QRS чередуется от удара к удару + синусовая тахикардия, низкий вольтаж · Почему: сердце качается в перикардиальном выпоте (электрическая альтернация → тампонада)."
     if delta > 0.05 and pr < 120.0:
         return "Как отличить: короткий PR + дельта-волна (плавный наклон в начале QRS) · Почему: дополнительный путь (пучок Кента) проводит в обход АВ-узла (WPW)."
     if pr_dep > 0.1:

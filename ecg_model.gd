@@ -763,6 +763,25 @@ static func _build_beatsets(p: Dictionary, ev: Dictionary) -> Dictionary:
             qeff_out = maxf(qeff_out, float(bcb["qeff"]))
         for bi in range(vent.size()):
             idx.append(bi % 2)
+    elif float(p.get("alternans", 0.0)) > 0.0 and rhythm == "sinus" and float(p.get("pvc_rate", 0.0)) <= 0.0:
+        # Электрическая альтернация (перикардиальный выпот/тампонада): сердце качается в
+        # жидкости → амплитуда QRS-T чередуется через удар + лёгкое качание оси.
+        var amp := clampf(float(p["alternans"]), 0.0, 1.0)
+        var akind := str(p.get("bbb", "none"))
+        akind = akind if (akind == "lbbb" or akind == "rbbb") else "n"
+        for variant in 2:
+            var pv := p.duplicate(true)
+            if variant == 1:
+                pv["r_amp"] = float(p["r_amp"]) * (1.0 - 0.5 * amp)
+                pv["s_amp"] = float(p["s_amp"]) * (1.0 - 0.5 * amp)
+                pv["q_amp"] = float(p["q_amp"]) * (1.0 - 0.5 * amp)
+                pv["t_amp"] = float(p["t_amp"]) * (1.0 - 0.4 * amp)
+                pv["qrs_axis"] = float(p["qrs_axis"]) + 12.0 * amp
+            var bca := _beat_components(pv, akind)
+            sets.append(bca)
+            qeff_out = maxf(qeff_out, float(bca["qeff"]))
+        for bi in range(vent.size()):
+            idx.append(bi % 2)
     else:
         var kindmap := {}
         for vv in vent:
@@ -1413,6 +1432,9 @@ static func wellbeing(p: Dictionary, s: Dictionary) -> Dictionary:
         sev = maxi(sev, 3)
     if qtc_v > THR.qtc_torsades:
         issues.append("длинный QTc — риск Torsades/обморока")
+        sev = maxi(sev, 2)
+    if float(p.get("alternans", 0.0)) > 0.4:
+        issues.append("электрическая альтернация — перикардиальный выпот/тампонада")
         sev = maxi(sev, 2)
 
     var text := ""
